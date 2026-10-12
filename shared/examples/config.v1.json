@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Default",
+      "pages": [
+        {
+          "id": "main",
+          "name": "Main",
+          "grid": {
+            "columns": 3,
+            "rows": 2
+          },
+          "buttons": [
+            {
+              "id": "open-pocketdeck-site",
+              "label": "Open Website",
+              "icon": "globe",
+              "action_id": "action-open-pocketdeck-site"
+            },
+            {
+              "id": "button-copy",
+              "label": "Copy",
+              "action_id": "action-copy-shortcut"
+            },
+            {
+              "id": "button-save",
+              "label": "Save",
+              "action_id": "action-save-shortcut"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "action-open-pocketdeck-site",
+      "type": "open_url",
+      "enabled_for_execution": true,
+      "parameters": {
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "id": "action-copy-shortcut",
+      "type": "keyboard_shortcut",
+      "enabled_for_execution": false,
+      "parameters": {
+        "shortcut": "copy"
+      }
+    },
+    {
+      "id": "action-save-shortcut",
+      "type": "keyboard_shortcut",
+      "enabled_for_execution": false,
+      "parameters": {
+        "shortcut": "save"
+      }
+    }
+  ]
+}

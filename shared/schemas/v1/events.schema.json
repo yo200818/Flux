@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocketdeck.dev/schemas/events/v1/events.schema.json",
+  "title": "PocketDeck WebSocket Events",
+  "description": "Version 1 event envelope for local PocketDeck development connections.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "event_id", "type", "payload"],
+  "properties": {
+    "protocol_version": {
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "enum": [
+        "connection.ready",
+        "config.updated",
+        "server.pong",
+        "protocol.error"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current configuration revision for connection.ready and server.pong, or the new revision for config.updated."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Non-sensitive event-specific metadata."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "enum": ["connection.ready", "config.updated", "server.pong"]
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["revision"]
+      }
+    }
+  ]
+}

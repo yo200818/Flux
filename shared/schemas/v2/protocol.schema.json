@@ -1,0 +1,1382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocketdeck.dev/schemas/protocol/v2/protocol.schema.json",
+  "title": "PocketDeck Protocol v2 Message",
+  "description": "Transport-independent JSON message envelope. Protocol version is independent of configuration schema version. Pairing and normal sessions require an authenticated, server-verified secure transport.",
+  "$comment": "Configuration snapshots and deltas are limited to 4 MiB serialized UTF-8. Every other message is limited to 16 KiB serialized UTF-8; enforce before parsing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "message_id", "type", "payload"],
+  "properties": {
+    "protocol_version": {
+      "const": 2
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique message UUID. For action.execute, this is the idempotency key scoped to the authenticated device."
+    },
+    "in_reply_to": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "enum": [
+        "pairing.claim",
+        "pairing.pending",
+        "pairing.status",
+        "pairing.status.result",
+        "pairing.approved",
+        "client.hello",
+        "server.welcome",
+        "config.sync",
+        "config.snapshot",
+        "configuration.upload",
+        "configuration.upload.result",
+        "config.delta",
+        "message.ack",
+        "action.execute",
+        "action.result",
+        "action.status.query",
+        "action.status.result",
+        "telemetry.subscribe",
+        "telemetry.subscribed",
+        "telemetry.unsubscribe",
+        "telemetry.unsubscribed",
+        "telemetry.update",
+        "client.ping",
+        "server.pong",
+        "protocol.error"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "type": {
+          "const": "pairing.claim"
+        },
+        "payload": {
+          "$ref": "#/$defs/pairingClaim"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "pairing.pending"
+        },
+        "payload": {
+          "$ref": "#/$defs/pairingPending"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "pairing.status"
+        },
+        "payload": {
+          "$ref": "#/$defs/pairingStatus"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "pairing.status.result"
+        },
+        "payload": {
+          "$ref": "#/$defs/pairingStatusResult"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "pairing.approved"
+        },
+        "payload": {
+          "$ref": "#/$defs/pairingApproved"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "client.hello"
+        },
+        "payload": {
+          "$ref": "#/$defs/hello"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "server.welcome"
+        },
+        "payload": {
+          "$ref": "#/$defs/welcome"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "config.sync"
+        },
+        "payload": {
+          "$ref": "#/$defs/sync"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "config.snapshot"
+        },
+        "payload": {
+          "$ref": "#/$defs/snapshot"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "configuration.upload"
+        },
+        "payload": {
+          "$ref": "#/$defs/snapshot"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "configuration.upload.result"
+        },
+        "payload": {
+          "$ref": "#/$defs/configurationUploadResult"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "config.delta"
+        },
+        "payload": {
+          "$ref": "#/$defs/delta"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "message.ack"
+        },
+        "payload": {
+          "$ref": "#/$defs/ack"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "action.execute"
+        },
+        "payload": {
+          "$ref": "#/$defs/actionRequest"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "action.result"
+        },
+        "payload": {
+          "$ref": "#/$defs/actionResult"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "action.status.query"
+        },
+        "payload": {
+          "$ref": "#/$defs/actionStatusQuery"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "action.status.result"
+        },
+        "payload": {
+          "$ref": "#/$defs/actionStatusResult"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "telemetry.subscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/telemetrySubscribe"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "telemetry.subscribed"
+        },
+        "payload": {
+          "$ref": "#/$defs/telemetrySubscribed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "telemetry.unsubscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/telemetryUnsubscribe"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "telemetry.unsubscribed"
+        },
+        "payload": {
+          "$ref": "#/$defs/telemetryUnsubscribed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "telemetry.update"
+        },
+        "payload": {
+          "$ref": "#/$defs/telemetryUpdate"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "client.ping"
+        },
+        "payload": {
+          "$ref": "#/$defs/empty"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "server.pong"
+        },
+        "payload": {
+          "$ref": "#/$defs/pong"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "protocol.error"
+        },
+        "payload": {
+          "$ref": "#/$defs/error"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "pairingClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pairing_code",
+        "device_name",
+        "client_type",
+        "supported_protocol_versions",
+        "supported_configuration_versions"
+      ],
+      "properties": {
+        "pairing_code": {
+          "type": "string"
+        },
+        "transport": {
+          "enum": ["wifi", "usb"]
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "client_type": {
+          "const": "android"
+        },
+        "supported_protocol_versions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "supported_configuration_versions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "transport": { "const": "usb" }
+              },
+              "required": ["transport"]
+            },
+            "then": {
+              "properties": {
+                "pairing_code": { "const": "" }
+              }
+            },
+            "else": {
+              "properties": {
+                "pairing_code": { "pattern": "^[0-9]{6}$" }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "pairingPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "device_id", "status", "expires_at"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "device_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "const": "pending"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "pairingStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "pairingStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "status"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "enum": ["pending", "approved", "rejected", "expired"]
+        }
+      }
+    },
+    "pairingApproved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "device_id",
+        "credential",
+        "credential_expires_at"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "device_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 512,
+          "writeOnly": true
+        },
+        "credential_expires_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_epoch", "revision"],
+      "properties": {
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "supported_protocol_versions",
+        "supported_configuration_versions"
+      ],
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "supported_protocol_versions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "supported_configuration_versions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "welcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "server_id",
+        "selected_protocol_version",
+        "selected_configuration_version",
+        "head"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "server_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selected_protocol_version": {
+          "const": 2
+        },
+        "selected_configuration_version": {
+          "const": 2
+        },
+        "head": {
+          "$ref": "#/$defs/revision"
+        }
+      }
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["last_accepted"],
+      "properties": {
+        "last_accepted": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/revision"
+            }
+          ]
+        },
+        "force_snapshot": {
+          "type": "boolean"
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_epoch", "revision", "configuration"],
+      "properties": {
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "configuration": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json"
+        }
+      }
+    },
+    "configurationUploadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "message"],
+      "properties": {
+        "outcome": {
+          "enum": ["succeeded", "failed"]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_epoch", "base_revision", "revision", "operations"],
+      "properties": {
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/configOperation"
+          }
+        }
+      }
+    },
+    "configOperation": {
+      "oneOf": [
+        {"$ref": "#/$defs/deckReplace"},
+        {"$ref": "#/$defs/profileUpsert"},
+        {"$ref": "#/$defs/profileRemove"},
+        {"$ref": "#/$defs/pageUpsert"},
+        {"$ref": "#/$defs/pageRemove"},
+        {"$ref": "#/$defs/buttonUpsert"},
+        {"$ref": "#/$defs/buttonRemove"},
+        {"$ref": "#/$defs/actionUpsert"},
+        {"$ref": "#/$defs/actionRemove"},
+        {"$ref": "#/$defs/commandUpsert"},
+        {"$ref": "#/$defs/commandRemove"},
+        {"$ref": "#/$defs/shortcutUpsert"},
+        {"$ref": "#/$defs/shortcutRemove"},
+        {"$ref": "#/$defs/settingsReplace"}
+      ]
+    },
+    "deckReplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "deck"],
+      "properties": {
+        "op": {"const": "deck.replace"},
+        "deck": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/properties/deck"
+        }
+      }
+    },
+    "profileUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "index", "profile"],
+      "properties": {
+        "op": {"const": "profile.upsert"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 31},
+        "profile": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/profile"
+        }
+      }
+    },
+    "profileRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "profile_id"],
+      "properties": {
+        "op": {"const": "profile.remove"},
+        "profile_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "pageUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "profile_id", "index", "page"],
+      "properties": {
+        "op": {"const": "page.upsert"},
+        "profile_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 31},
+        "page": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/page"
+        }
+      }
+    },
+    "pageRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "profile_id", "page_id"],
+      "properties": {
+        "op": {"const": "page.remove"},
+        "profile_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "page_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "buttonUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "profile_id", "page_id", "index", "button"],
+      "properties": {
+        "op": {"const": "button.upsert"},
+        "profile_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "page_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 63},
+        "button": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/button"
+        }
+      }
+    },
+    "buttonRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "profile_id", "page_id", "button_id"],
+      "properties": {
+        "op": {"const": "button.remove"},
+        "profile_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "page_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"},
+        "button_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "actionUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "index", "action"],
+      "properties": {
+        "op": {"const": "action.upsert"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 127},
+        "action": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/action"
+        }
+      }
+    },
+    "actionRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "action_id"],
+      "properties": {
+        "op": {"const": "action.remove"},
+        "action_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "commandUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "index", "command"],
+      "properties": {
+        "op": {"const": "command.upsert"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 63},
+        "command": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/command"
+        }
+      }
+    },
+    "commandRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "command_id"],
+      "properties": {
+        "op": {"const": "command.remove"},
+        "command_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "shortcutUpsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "index", "shortcut"],
+      "properties": {
+        "op": {"const": "shortcut.upsert"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 63},
+        "shortcut": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/savedShortcut"
+        }
+      }
+    },
+    "shortcutRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "shortcut_id"],
+      "properties": {
+        "op": {"const": "shortcut.remove"},
+        "shortcut_id": {"$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"}
+      }
+    },
+    "settingsReplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "settings"],
+      "properties": {
+        "op": {"const": "settings.replace"},
+        "settings": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/properties/settings"
+        }
+      }
+    },
+    "ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage"],
+      "properties": {
+        "stage": {
+          "enum": ["configuration.persisted", "action.accepted"]
+        },
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "configuration.persisted"
+              }
+            },
+            "required": ["stage"]
+          },
+          "then": {
+            "required": ["config_epoch", "revision"],
+            "not": {
+              "required": ["request_id"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "action.accepted"
+              }
+            },
+            "required": ["stage"]
+          },
+          "then": {
+            "required": ["request_id"],
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["config_epoch"]
+                },
+                {
+                  "required": ["revision"]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "actionRequest": {
+      "$comment": "The envelope message_id is the stable idempotency key. Requests with the same authenticated device ID and message_id must never execute more than once.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "button_id",
+        "config_epoch",
+        "config_revision",
+        "action"
+      ],
+      "properties": {
+        "button_id": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"
+        },
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "config_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "$ref": "#/$defs/windowsAction"
+        }
+      }
+    },
+    "windowsAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target", "type", "parameters"],
+      "properties": {
+        "id": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"
+        },
+        "target": {
+          "const": "windows_host"
+        },
+        "type": {
+          "enum": ["open_url", "application", "system_control", "keyboard_shortcut", "run_command"]
+        },
+        "parameters": {
+          "type": "object"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "open_url"
+            },
+            "parameters": {
+              "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/openUrlParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "application"
+            },
+            "parameters": {
+              "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/applicationParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "system_control"
+            },
+            "parameters": {
+              "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/systemControlParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "keyboard_shortcut"
+            },
+            "parameters": {
+              "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/keyboardShortcutParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "run_command"
+            },
+            "parameters": {
+              "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/runCommandParameters"
+            }
+          }
+        }
+      ]
+    },
+    "actionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "outcome", "message"],
+      "properties": {
+        "action_id": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"
+        },
+        "outcome": {
+          "enum": ["succeeded", "failed", "unknown"]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": ["failed", "unknown"]
+              }
+            },
+            "required": ["outcome"]
+          },
+          "then": {
+            "required": ["code"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "succeeded"
+              }
+            },
+            "required": ["outcome"]
+          },
+          "then": {
+            "not": {
+              "required": ["code"]
+            }
+          }
+        }
+      ]
+    },
+    "actionStatusQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "actionStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "outcome"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outcome": {
+          "enum": ["accepted", "succeeded", "failed", "unknown"]
+        },
+        "action_id": {
+          "$ref": "https://pocketdeck.dev/schemas/config/v2/config.schema.json#/$defs/id"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": ["failed", "unknown"]
+              }
+            },
+            "required": ["outcome"]
+          },
+          "then": {
+            "required": ["code"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "succeeded"
+              }
+            },
+            "required": ["outcome"]
+          },
+          "then": {
+            "required": ["action_id"]
+          }
+        }
+      ]
+    },
+    "telemetrySubscribe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_epoch", "config_revision", "interval_ms"],
+      "properties": {
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "config_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 2500,
+          "maximum": 60000
+        }
+      }
+    },
+    "telemetrySubscribed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id", "config_epoch", "config_revision", "interval_ms", "expires_after_ms"],
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "config_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 2500,
+          "maximum": 60000
+        },
+        "expires_after_ms": {
+          "type": "integer",
+          "minimum": 7500,
+          "maximum": 180000
+        }
+      }
+    },
+    "telemetryUnsubscribe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id"],
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "telemetryUnsubscribed": {
+      "$ref": "#/$defs/telemetryUnsubscribe"
+    },
+    "cpuMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value"],
+      "properties": {
+        "status": {
+          "enum": ["sampling", "available", "unavailable"]
+        },
+        "value": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": ["sampling", "unavailable"]
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unavailable"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["reason"]
+          }
+        }
+      ]
+    },
+    "memoryMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "used_bytes", "total_bytes"],
+      "properties": {
+        "status": {
+          "enum": ["available", "unavailable"]
+        },
+        "used_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "total_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {"const": "available"},
+            "used_bytes": {"type": "integer", "minimum": 0},
+            "total_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "properties": {
+            "status": {"const": "unavailable"},
+            "used_bytes": {"type": "null"},
+            "total_bytes": {"type": "null"}
+          },
+          "required": ["status", "used_bytes", "total_bytes", "reason"]
+        }
+      ]
+    },
+    "unsupportedMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "code", "message"],
+      "properties": {
+        "status": {"const": "unavailable"},
+        "code": {"const": "unsupported"},
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "telemetryUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream_id", "sequence", "config_epoch", "config_revision", "sampled_at", "expires_at", "metrics"],
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "config_epoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "config_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sampled_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu_utilization", "memory_usage", "gpu_utilization", "gpu_temperature", "cpu_temperature"],
+          "properties": {
+            "cpu_utilization": {"$ref": "#/$defs/cpuMetric"},
+            "memory_usage": {"$ref": "#/$defs/memoryMetric"},
+            "gpu_utilization": {"$ref": "#/$defs/unsupportedMetric"},
+            "gpu_temperature": {"$ref": "#/$defs/unsupportedMetric"},
+            "cpu_temperature": {"$ref": "#/$defs/unsupportedMetric"}
+          }
+        }
+      }
+    },
+    "empty": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "pong": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head"],
+      "properties": {
+        "head": {
+          "$ref": "#/$defs/revision"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "unsupported_protocol",
+            "unsupported_configuration",
+            "invalid_message",
+            "unauthorized",
+            "revoked",
+            "pairing_code_invalid",
+            "pairing_expired",
+            "pairing_rejected",
+            "pairing_rate_limited",
+            "revision_mismatch",
+            "snapshot_required",
+            "invalid_configuration",
+            "invalid_configuration_operation",
+            "configuration_persistence_failed",
+            "idempotency_conflict",
+            "request_not_found",
+            "request_expired",
+            "action_not_found",
+            "action_forbidden",
+            "invalid_action",
+            "action_execution_failed",
+            "action_outcome_unknown",
+            "invalid_telemetry_subscription",
+            "message_too_large",
+            "server_busy",
+            "internal_error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "message"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 256
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

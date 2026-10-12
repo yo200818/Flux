@@ -1,204 +1,220 @@
-# PocketDeck Architecture
+# PocketDeck Architecture Decisions
 
-> **Status:** This document describes a proposed architecture for a clean-start
-> repository. The components and workflows below are plans, not claims about
-> implemented or working software. Items marked **Future** are explicitly
-> deferred.
+**Status:** Phase 1 decisions finalized for the next protocol generation.
+These decisions specify a target contract; they do not claim that an Android
+client, Wi-Fi mobile transport, USB transport, or protocol-v2 server is
+implemented.
 
-## Goals and boundaries
+## Product boundary
 
-PocketDeck is intended to let a user control approved actions on a Windows PC
-from connected devices. Keep the first implementation small: establish a
-versioned protocol, implement a narrow set of safe actions, and add clients and
-transports in milestones.
+- **Android is the deck runtime.** It owns an atomic, persistent local copy of
+  the last accepted configuration. It restores that copy after process restart
+  and resolves a button press against its local configuration without a
+  per-press configuration request.
+- **Windows is the studio and privileged executor.** The Windows application
+  edits and publishes configurations, pairs/revokes devices, validates
+  incoming Windows-targeted action requests, and executes only registered,
+  explicitly permitted Windows actions.
+- **A button references a configuration action by stable `action_id`.** Its
+  action declares a transport-independent target (`android_local` or
+  `windows_host`), type, and validated parameters. Android runs local actions
+  itself and sends a self-contained, authenticated request for a
+  Windows-targeted action.
+- **Configuration distribution is separate from action execution.** Windows
+  sends a complete snapshot at setup/recovery and publishes accepted edits.
+  A client can apply a contiguous incremental update or request a snapshot.
+  Windows does not need to answer an Android configuration lookup for each
+  button press.
+- **Wi-Fi and USB-C are transports, not data models.** Both carry the same
+  versioned message envelopes and configuration/action meanings. Network,
+  serial-port, USB-role, and discovery details do not belong in configuration
+  objects.
+- **The web UI is out of scope for this phase.** Existing browser behavior is
+  not a new target for the mobile protocol.
 
-Windows is authoritative. It owns the shared configuration and executes PC
-actions. Connected clients request changes or actions; they do not become
-independent sources of truth and must never receive unrestricted shell access.
+## Components and responsibility recommendation
 
-## Component overview
+| Component | Decision |
+| --- | --- |
+| Windows Tauri studio | Retain. It is the local user interface, process owner, and trusted configuration editor. |
+| FastAPI backend | Retain for now as a separately testable local service and boundary around persisted configuration, pairing/device registry, and the existing action registry. Do not replace or remove it in Phase 1. |
+| Windows executor | Keep behind the backend/action-registry boundary. The Tauri-owned backend process is currently the executor for its supported action. A later implementation may move this boundary into the Windows host, but only with equivalent authentication, registry validation, lifecycle ownership, and contract tests. |
+| Android runtime | New future client. Persist and interpret configuration locally; do not call the Windows configuration API to resolve every press. |
+| Shared contracts | `shared/schemas/v1` is the deployed legacy contract; `shared/schemas/v2` is the target contract finalized here. Protocol and configuration versions are independent. |
+| Transports | Wi-Fi WebSocket is the first target transport. USB-C serial is an investigated, unresolved option and is not declared supported. |
 
-| Component | Responsibility | Initial status |
+FastAPI should not be embedded into the Tauri process or replaced in this
+phase. Existing storage, revision checks, pairing, and action execution are
+working integration points. The service currently binds to loopback, while
+mobile Wi-Fi requires a deliberate later networking/security deployment
+design; the current server is not a LAN service.
+
+## Source-of-truth and storage
+
+Windows owns the published configuration and its monotonically increasing
+revision. A configuration revision is a non-negative integer scoped to a
+server-generated `config_epoch` UUID. Windows persists both with the accepted
+configuration. It must not silently reset or reuse a revision within an epoch.
+If revision continuity is lost, it creates a new epoch and requires a full
+snapshot; a client must not apply deltas from another epoch.
+
+Android stores the accepted configuration, epoch, revision, and integrity
+metadata in app-private persistent storage. It validates every snapshot/delta,
+applies an update to a candidate copy, writes and atomically commits it, then
+updates in-memory state and acknowledges the committed revision. A failed
+write leaves the previous saved and active configuration intact. Process
+restart restores the last committed copy. UI-only state such as selected
+profile/page is local and is not added to the shared configuration.
+
+The current FastAPI store persists its configuration and integer revision on
+Windows. It does not yet implement `config_epoch`, Android persistence, or
+protocol-v2 snapshot/delta delivery. Those are implementation blockers for
+mobile synchronization, not reasons to change the working v1 endpoint in this
+architecture-only phase.
+
+## Configuration and actions
+
+The target configuration contract is
+[`../shared/schemas/v2/config.schema.json`](../shared/schemas/v2/config.schema.json)
+with a representative document at
+[`../shared/examples/config.v2.json`](../shared/examples/config.v2.json).
+It retains stable deck identity, profiles, pages, ordered buttons,
+presentation fields, globally unique stable IDs, and validated action
+parameters. Empty profiles/pages/action lists can represent an initial or
+temporarily empty deck. V2 makes the action target explicit and keeps
+transport data out of the document. The Android UI remains free to choose how
+it presents profile/page selection and button color/icons.
+
+Buttons carry only an `action_id`; clients resolve it against the configuration
+they already have. A local action (`android_local`) runs on Android only after
+the client validates the referenced action and parameters. A remote action
+(`windows_host`) is sent with its action descriptor, button ID, source
+configuration revision, and unique request ID. The descriptor makes the
+request self-contained; it is not permission to execute.
+
+Before dispatch, Windows must authenticate the device, require a current
+published configuration revision, resolve the action in its in-memory
+published-action catalogue, require that the button/action association and
+parameters match that revision, validate target/type/parameters through the
+Windows action registry, apply Windows-owned execution policy, and deduplicate
+the request ID. The caller's `enabled_for_execution` value is not a security
+decision. Do not accept arbitrary process names, shell strings, scripts, URLs
+without registry validation, or client-supplied policy.
+
+The existing v1 backend resolves an action ID from its current configuration
+for every `/api/actions/{id}/execute` call. It dispatches `open_url` and,
+on Windows, an allowlisted `keyboard_shortcut` through `SendInput` to the
+active foreground window. That API authenticates the caller and validates the
+stored action, but is not the v2 mobile command; v2 must not degrade to a
+button-press-time Android configuration fetch. A bounded idempotency ledger is
+required for v2 Windows actions; after a crash, a recorded in-progress request
+is reported as outcome-unknown rather than automatically executed a second
+time.
+
+## Protocol, synchronization, and transport
+
+The target wire contract is
+[`protocol-v2.md`](./protocol-v2.md), with machine-readable envelope schema
+[`../shared/schemas/v2/protocol.schema.json`](../shared/schemas/v2/protocol.schema.json).
+It specifies negotiation, pairing/authenticated connection, configuration
+sync and publish, acknowledgements, actions, structured errors, reconnect,
+and revision handling. Protocol version 2 and configuration schema version 2
+are negotiated independently.
+
+The transport interface delivers bounded complete UTF-8 JSON messages and
+reports connection state. A transport is responsible for discovery/connect,
+framing, byte delivery, and close/error notification; protocol handlers own
+version negotiation, authorization context, message validation, sync,
+acknowledgements, and actions. Wi-Fi WebSocket frames already provide message
+boundaries. The proposed USB byte stream uses a 4-byte big-endian length
+prefix followed by one UTF-8 JSON message; the prefix is transport framing,
+not a protocol field.
+
+The USB investigation, device-role constraints, evidence sources, and
+unresolved questions are in
+[`usb-c-feasibility.md`](./usb-c-feasibility.md). A USB-C connector alone does
+not imply a compatible serial/device role or a working application channel.
+
+## Pairing and security
+
+The current Windows API pairs through a short-lived one-use code, explicit
+administrator approval, a generated device bearer credential, and revocation.
+The device registry stores a SHA-256 digest, not plaintext device credentials.
+The current packaged Windows app generates its administrator token at runtime;
+development requires a private shared environment token. These existing
+behaviors are described in [`development.md`](./development.md).
+
+The target Android client stores its device credential encrypted with an
+Android Keystore-protected key in app-private storage, excludes it from
+backup/export, and clears it on logout/re-pair. The Windows device registry
+stores only a verifier for high-entropy bearer tokens; administrative secrets
+remain separate from device credentials. A lost or revoked credential is
+rejected on new HTTP/WebSocket/USB authentication. Active sessions are closed
+when practical; offline clients learn of revocation when they reconnect.
+
+For Wi-Fi, the mobile deployment must use authenticated encrypted transport
+(WSS) and a deliberate certificate/trust strategy. Current loopback `ws://`
+and HTTP behavior is development/desktop-only and does not meet this remote
+transport requirement. USB authentication must be cryptographically
+authenticated even when physically attached; physical access is not
+authorization. The USB credential-protection/handshake design is unresolved
+and blocks declaring USB support.
+
+Never weaken the existing restrictive Tauri CSP, loopback binding, action
+registry, or device authorization to make a transport work. No unrestricted
+shell or arbitrary command execution is permitted.
+
+## Compatibility and migration
+
+V1 remains the current Windows runtime schema and current desktop WebSocket
+contract. V2 is additive and is not accepted by the present backend. Do not
+silently reinterpret a v1 document as v2 or send v2 fields to the v1 PUT API.
+
+Before rollout, implement and test an explicit v1-to-v2 migration:
+
+1. Keep the existing `%APPDATA%\PocketDeck\configuration.json` (or
+   `POCKETDECK_CONFIG_PATH`) strictly v1 until a deliberate migration UI and
+   v2 runtime exist. The current loader validates as v1; invalid/unreadable
+   saved files cause startup failure and remain unchanged. No automatic
+   conversion is implemented.
+2. Preserve the original document and all profile/page/button/action IDs and
+   order; write a backup and use atomic replacement.
+3. Add one stable `deck.id`; add `target: "windows_host"` to each legacy
+   action because v1 does not encode a target and the v1 executor runs actions
+   on Windows. This is a conservative mapping; local Android actions are new
+   explicit v2 data, never inferred from a legacy action name.
+4. Preserve labels, icon/color appearance fields, enablement, and parameters.
+   Validate the complete v2 result, references, IDs, action target/parameter
+   rules, and grid capacity before publishing it.
+5. Assign a new protocol/configuration epoch where needed and publish a full
+   snapshot. If migration or validation fails, keep the original v1 data
+   untouched and report a recoverable error.
+6. Keep legacy desktop v1 clients and APIs working until a separately planned
+   compatibility window ends.
+
+Do not begin Android UI implementation until the v2 schemas/specification pass
+contract validation and the blockers below have owners and decisions.
+
+## Current discrepancies and blockers
+
+| Target decision | Current implementation | Required later work |
 | --- | --- | --- |
-| **PocketDeck Desktop** | Windows desktop application built with Tauri, React, and Vite. Provides the local user interface and packages or starts the local backend as the implementation is decided. | Planned; not implemented |
-| **Python backend** | FastAPI service responsible for managing connected devices, validating requests, maintaining shared configuration, and executing approved PC actions. | Planned; not implemented |
-| **Action registry** | Central, allowlisted set of supported actions. Each action defines its input validation and execution behavior. | Planned; not implemented |
-| **Shared configuration** | Versioned JSON data for buttons, layouts, profiles, pages, and actions. Windows owns the authoritative copy. | Planned; not implemented |
-| **Connected clients** | Initially, mobile clients connect over Wi-Fi and use the shared protocol to read configuration and request approved actions. | Future; not implemented |
-| **Other clients** | Android, iOS, and web clients are intended to use the same shared protocol. | Future; not implemented |
-| **PocketDeck OS** | Deferred Linux-based client/device concept. It must use the same shared protocol. USB-C serial is a possible future transport, subject to hardware compatibility. | Deferred future; not implemented |
+| Android owns a durable local configuration and resolves button presses locally. | No Android project/client exists; backend owns the only persisted configuration. | Implement an Android repository/cache and restart-safe atomic persistence. |
+| A published snapshot/delta protocol carries configuration and revisions. | `GET/PUT /api/config` handles complete documents; current WebSocket only accepts `client.ping` and emits revision notifications. | Add v2 negotiation, sync, full snapshot, contiguous deltas, acknowledgements, and recovery. |
+| Every action declares local-vs-Windows target. | V1 actions have `id`, `type`, parameters, and enablement but no target. | Migrate v1 to v2 and add target-aware validation on both sides. |
+| Android resolves actions locally; Windows validates a self-contained Windows request. | Existing action API accepts only action ID and reads the configuration for each request. | Implement the v2 request and cached published-action catalogue, registry/policy validation, and deduplication. |
+| Wi-Fi clients use protected transport. | FastAPI/Tauri currently use loopback HTTP/WS; no TLS/mobile LAN endpoint is configured. | Design and test WSS, address discovery, certificate/trust and firewall behavior without opening LAN access prematurely. |
+| USB-C is a transport alternative. | No serial API/driver/USB role support is implemented or hardware-tested. | Resolve Android/Windows roles, supported hardware, Windows serial access, authentication, and framing on actual devices. |
+| Config IDs/revisions are epoch-scoped. | Current Windows config store persists integer revision only. | Add a backward-compatible persisted epoch and migration/recovery rules. |
+| Pairing/revocation and session auth work across clients. | Existing FastAPI foundation supports device credentials and WebSocket authorization; no Android pairing UI/storage exists. | Define and test mobile enrollment, protected credential storage, active revocation, and protocol negotiation. |
 
-### Proposed module boundaries
+## Validation policy
 
-- **Desktop shell and UI:** Tauri owns the Windows desktop application boundary;
-  React components implement the UI, and Vite supports the frontend
-  development/build workflow.
-- **Backend API:** FastAPI handles REST management requests and WebSocket
-  connections. Keep transport handling separate from business rules.
-- **Domain services:** Configuration validation and revision tracking, device
-  management, pairing authorization, and action dispatch should be distinct
-  responsibilities.
-- **Action registry:** Action definitions and their validation live behind a
-  narrow dispatch interface. The API accepts action identifiers and
-  schema-validated arguments, not arbitrary commands.
-- **Protocol and schema:** Versioned JSON definitions describe the data and
-  messages shared by the Windows host and every client. Clients should not
-  need Windows-specific action execution logic.
-
-These are proposed boundaries, not a prescription to create every module at
-once. Start with the smallest useful set and split modules when a boundary
-improves clarity or testability.
-
-## Shared configuration and protocol
-
-Define a versioned JSON schema for:
-
-- **Buttons** and their presentation and assigned action.
-- **Layouts** and how buttons are arranged.
-- **Profiles** and their associated layouts or settings.
-- **Pages** and navigation between groups of controls.
-- **Actions** and their identifiers and validated parameters.
-
-The schema should state required fields, allowed values, and compatibility
-rules. Validate configuration when it is loaded and before accepting an
-update. Include a schema or protocol version so clients can detect incompatible
-data and handle unsupported versions explicitly.
-
-Windows owns the authoritative configuration. Clients may request edits, but
-the backend validates and applies them. Track a monotonically increasing
-revision for accepted configuration changes. Clients can compare revisions
-after reconnecting and request the latest state; stale updates should be
-detected rather than silently overwriting newer state.
-
-The same protocol should work for future Android, iOS, web, and PocketDeck OS
-clients. Do not make transport-specific details part of the shared
-configuration format.
-
-## Communication flow
-
-Use **REST APIs** for management and **WebSockets** for real-time updates.
-The initial intended mobile transport is Wi-Fi. USB-C serial is a **future**
-option for PocketDeck OS only, contingent on compatible hardware and a defined
-transport implementation.
-
-1. The desktop starts or connects to the local FastAPI backend.
-2. A device discovers or is given the Windows host address, then pairs with
-   authorization from the Windows user.
-3. After authentication, the client uses REST to retrieve configuration,
-   inspect permitted capabilities, and submit management requests.
-4. The client opens an authenticated WebSocket to receive configuration
-   revision changes, connection-state updates, and action results.
-5. To run an action, the client sends an action identifier and arguments. The
-   backend validates the request, checks that the device is authorized, and
-   dispatches only through the action registry.
-6. Windows executes the approved action and reports a result. The backend logs
-   the outcome and sends a real-time update when appropriate.
-7. On disconnect, the client reconnects, reauthenticates, and reconciles its
-   configuration using the current revision.
-
-REST and WebSocket operations should share the same authorization rules and
-domain services. A WebSocket connection is not itself proof of permission to
-change configuration or execute an action.
-
-## Security boundaries
-
-- **No unrestricted shell execution:** Never expose a shell, command string,
-  or arbitrary process-launch API to connected clients. Action execution must
-  go through a central allowlist of explicitly supported operations.
-- **Validate at the host:** Treat all client messages and stored/imported
-  configuration as untrusted. Validate message shape, schema version, action
-  identifier, and action arguments in the backend before applying them.
-- **Authenticate devices:** Require device authentication for REST and
-  WebSocket access. Do not treat possession of the host address or an open
-  connection as authentication.
-- **Authorize pairing:** Pairing requires explicit authorization by the
-  Windows user. Provide a way to revoke a paired device; enforce authorization
-  again when a device reconnects.
-- **Limit capabilities:** Give each operation only the authority it needs.
-  Clients request actions; only the Windows backend executes them.
-- **Keep useful logs:** Record pairing and revocation, configuration
-  revisions, action identifiers, request outcomes, and errors. Avoid logging
-  secrets or unnecessarily sensitive user data.
-- **Make failures explicit:** Reject invalid, unsupported, or unauthorized
-  requests with clear errors. Do not report success when validation or action
-  execution failed.
-
-Authentication credentials, key storage, network exposure, and the exact
-pairing UX still need concrete designs before implementation. They must be
-decided and tested before relying on the service outside a trusted development
-setup.
-
-## Reliability and testing
-
-Plan for device authentication, pairing authorization, configuration revision
-tracking, reconnect handling, validation, logging, and tests from the start.
-For reconnects, restore authenticated state only through the defined
-authentication flow, then reconcile revisions; do not assume missed real-time
-events were received.
-
-Test the shared schema and validation, API authorization, action-registry
-allowlisting, revision conflicts, device disconnect/reconnect behavior, and
-WebSocket event delivery. Keep action execution behind a boundary that can be
-tested without triggering real PC actions. Add focused tests with each
-milestone rather than postponing testing until the system is integrated.
-
-## Proposed repository structure
-
-The following is a **proposal**, not a description of existing files:
-
-```text
-Pocketdeck/
-  docs/
-    architecture.md
-  apps/
-    desktop/                 # Planned: Tauri + React + Vite Windows app
-  backend/
-    app/
-      api/                    # Planned: FastAPI REST and WebSocket endpoints
-      devices/                # Planned: device and pairing management
-      config/                 # Planned: shared configuration and revisions
-      actions/                # Planned: action registry and dispatch
-      protocol/               # Planned: message and schema validation
-    tests/                    # Planned: focused backend and protocol tests
-  shared/
-    schemas/                  # Planned: versioned JSON configuration schemas
-```
-
-Create folders as their milestone begins; do not add placeholder modules just
-to match this tree. Keep UI code, backend responsibilities, and shared protocol
-definitions separate, and document any deliberate change to this proposal.
-
-## Implementation milestones
-
-Each milestone should be small enough to run and test locally before starting
-the next one. Avoid unnecessary dependencies; use the chosen frameworks and
-standard libraries where they meet the need.
-
-1. **Agree on the protocol shape:** Draft the versioned JSON schema for
-   buttons, layouts, profiles, pages, and actions. Add examples and validation
-   tests. Do not execute PC actions yet.
-2. **Build the local Windows shell:** Establish the Tauri, React, and Vite
-   desktop development workflow and a basic UI. Keep it independent of remote
-   clients.
-3. **Add the backend foundation:** Introduce FastAPI with health and
-   management endpoints, configuration validation, and focused tests. Decide
-   how the desktop starts and supervises the backend before depending on it.
-4. **Add safe action dispatch:** Implement a small action registry with a
-   minimal set of explicitly approved actions. Test argument validation,
-   authorization, rejection of unknown actions, and failure reporting.
-5. **Add authenticated device pairing:** Define the pairing UX, credential
-   handling, authorization, and revocation. Test denied and revoked devices
-   as well as successful pairing.
-6. **Add real-time updates and recovery:** Introduce authenticated WebSockets,
-   configuration revisions, action results, disconnect handling, and
-   reconnect reconciliation. Test missed updates and stale revisions.
-7. **Add the first mobile client over Wi-Fi:** Use the shared protocol rather
-   than adding a client-specific backend. Keep **Android and iOS future work**
-   until selected and implemented.
-8. **Evaluate additional clients and transports:** A **web client** and
-   **PocketDeck OS** are future work. Consider USB-C serial for PocketDeck OS
-   only after confirming hardware compatibility and specifying how it carries
-   the shared protocol.
-
-At each step, preserve clear module boundaries, run focused tests, and record
-unfinished decisions rather than treating proposed behavior as implemented.
+The v2 schema is transport-independent and self-contained; the protocol
+specification is authoritative for message sequencing and persistence
+acknowledgements. Contract tests must check that the representative v2 example,
+schema fields, action-target rules, messages, and legacy v1 sample remain
+consistent. Existing backend/frontend integration tests continue to validate
+the v1 runtime until v2 is implemented. Contract/spec tests do not prove
+Android persistence, remote WSS security, USB compatibility, or action
+execution on Android.

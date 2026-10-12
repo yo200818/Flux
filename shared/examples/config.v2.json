@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "deck": {
+    "id": "pocketdeck-main",
+    "name": "PocketDeck"
+  },
+  "profiles": [
+    {
+      "id": "default",
+      "name": "Default",
+      "pages": [
+        {
+          "id": "main",
+          "name": "Main",
+          "grid": {
+            "columns": 2,
+            "rows": 2
+          },
+          "buttons": [
+            {
+              "id": "open-site-button",
+              "label": "Open Website",
+              "icon": "globe",
+              "color": "#5B9DFF",
+              "action_id": "open-site"
+            },
+            {
+              "id": "copy-button",
+              "label": "Copy",
+              "icon": "document",
+              "action_id": "copy-shortcut"
+            },
+            {
+              "id": "open-local-url-button",
+              "label": "Open locally",
+              "action_id": "open-local-url"
+            },
+            {
+              "id": "command-button",
+              "label": "Prepare Copy",
+              "action_id": "prepare-copy-action"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "open-site",
+      "target": "windows_host",
+      "type": "open_url",
+      "enabled_for_execution": true,
+      "parameters": {
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "id": "copy-shortcut",
+      "target": "windows_host",
+      "type": "keyboard_shortcut",
+      "enabled_for_execution": false,
+      "parameters": {
+        "shortcut_id": "copy-shortcut-definition"
+      }
+    },
+    {
+      "id": "open-local-url",
+      "target": "android_local",
+      "type": "open_url",
+      "enabled_for_execution": true,
+      "parameters": {
+        "url": "https://developer.android.com/"
+      }
+    },
+    {
+      "id": "prepare-copy-action",
+      "target": "windows_host",
+      "type": "run_command",
+      "enabled_for_execution": true,
+      "parameters": {
+        "command_id": "prepare-copy-command"
+      }
+    }
+  ],
+  "commands": [
+    {
+      "id": "prepare-copy-command",
+      "definition_version": 1,
+      "name": "Prepare Copy",
+      "description": "Open the guide, copy, then pause.",
+      "category": "General",
+      "enabled": true,
+      "steps": [
+        {
+          "type": "open_url",
+          "parameters": {
+            "url": "https://example.com/"
+          }
+        },
+        {
+          "type": "keyboard_shortcut",
+          "parameters": {
+            "shortcut_id": "copy-shortcut-definition"
+          }
+        },
+        {
+          "type": "wait",
+          "parameters": {
+            "milliseconds": 250
+          }
+        }
+      ]
+    }
+  ],
+  "shortcuts": [
+    {
+      "id": "copy-shortcut-definition",
+      "name": "Copy",
+      "shortcut": "copy"
+    }
+  ],
+  "settings": {
+    "confirm_commands": true
+  }
+}

@@ -1,0 +1,555 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocketdeck.dev/schemas/config/v1/config.schema.json",
+  "title": "PocketDeck Configuration",
+  "description": "Version 1 of the transport-independent PocketDeck configuration format. The backend also enforces global ID uniqueness, action references, and button-to-grid capacity.",
+  "$comment": "JSON Schema checks local structure and field constraints. Cross-object constraints are enforced by the backend configuration validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profiles", "actions"],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Configuration format version."
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "commands": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/command"
+      },
+      "description": "Optional v1 extension for saved, named, reusable command definitions."
+    },
+    "shortcuts": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/savedShortcut"
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirm_commands": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "description": "Stable identifier, unique across profiles, pages, buttons, and actions."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "pages"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "pages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/page"
+          }
+        }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "grid", "buttons"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "grid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["columns", "rows"],
+          "properties": {
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
+          }
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "Button array order is the display order, laid out row by row.",
+          "items": {
+            "$ref": "#/$defs/button"
+          }
+        }
+      }
+    },
+    "button": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "action_id"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Optional icon reference; it is not executable content."
+        },
+        "color": {
+          "type": ["string", "null"],
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Optional six-digit RGB accent color."
+        },
+        "action_id": {
+          "description": "A stable ID referring to a declared action, or null when no action is assigned.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "parameters"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": ["open_url", "application", "system_control", "system_monitor", "keyboard_shortcut", "run_command"]
+        },
+        "parameters": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/openUrlParameters"
+            },
+            {
+              "$ref": "#/$defs/applicationParameters"
+            },
+            {
+              "$ref": "#/$defs/systemControlParameters"
+            },
+            {
+              "$ref": "#/$defs/systemMonitorParameters"
+            },
+            {
+              "$ref": "#/$defs/keyboardShortcutParameters"
+            },
+            {
+              "$ref": "#/$defs/runCommandParameters"
+            }
+          ]
+        },
+        "enabled_for_execution": {
+          "type": "boolean",
+          "description": "Must be true before a client request can execute this action."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "system_monitor"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/systemMonitorParameters"
+              },
+              "enabled_for_execution": {
+                "const": false,
+                "description": "System monitoring is read-only and cannot be executed."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "open_url"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/openUrlParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "application"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/applicationParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "system_control"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/systemControlParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "keyboard_shortcut"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/keyboardShortcutParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "run_command"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/runCommandParameters"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "openUrlParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Optional friendly name shown in the editor and reusable action list."
+        }
+      }
+    },
+    "applicationParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Friendly name displayed in PocketDeck."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32768,
+          "pattern": "^(?:[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+[\\\\/]).*\\.[eE][xX][eE]$",
+          "description": "Absolute Windows executable path chosen explicitly by the user; the backend checks existence and launches this path directly without a shell."
+        }
+      }
+    },
+    "systemControlParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control"],
+      "properties": {
+        "control": {
+          "enum": [
+            "volume_up",
+            "volume_down",
+            "mute_toggle",
+            "brightness_up",
+            "brightness_down"
+          ]
+        }
+      }
+    },
+    "systemMonitorParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric"],
+      "properties": {
+        "metric": {
+          "enum": [
+            "cpu_utilization",
+            "memory_usage",
+            "gpu_utilization",
+            "gpu_temperature",
+            "cpu_temperature"
+          ],
+          "description": "Read-only telemetry metric displayed on its assigned button."
+        }
+      }
+    },
+    "keyboardShortcutParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shortcut": {
+          "$ref": "#/$defs/keyboardShortcutValue"
+        },
+        "shortcut_id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["shortcut"],
+          "not": {
+            "required": ["shortcut_id"]
+          }
+        },
+        {
+          "required": ["shortcut_id"],
+          "not": {
+            "required": ["shortcut"]
+          }
+        }
+      ]
+    },
+    "runCommandParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command_id"],
+      "properties": {
+        "command_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "savedShortcut": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "shortcut"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "shortcut": {
+          "$ref": "#/$defs/keyboardShortcutValue"
+        }
+      }
+    },
+    "keyboardShortcutValue": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(copy|paste|cut|undo|redo|save|select_all|switch_app|((CTRL|ALT|SHIFT|WIN)\\+)*(CTRL|ALT|SHIFT|WIN)\\+([A-Z0-9]|NUMPAD[0-9]|F([1-9]|1[0-9]|2[0-4])|ENTER|NUMPADENTER|TAB|ESC|SPACE|BACKSPACE|DELETE|INSERT|HOME|END|PAGEUP|PAGEDOWN|UP|DOWN|LEFT|RIGHT|BACKQUOTE|MINUS|EQUAL|BRACKETLEFT|BRACKETRIGHT|BACKSLASH|SEMICOLON|QUOTE|COMMA|PERIOD|SLASH|NUMPADADD|NUMPADSUBTRACT|NUMPADMULTIPLY|NUMPADDIVIDE|NUMPADDECIMAL))$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "(^|\\+)CTRL(\\+[^+]+)*\\+CTRL($|\\+)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\+)ALT(\\+[^+]+)*\\+ALT($|\\+)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\+)SHIFT(\\+[^+]+)*\\+SHIFT($|\\+)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\+)WIN(\\+[^+]+)*\\+WIN($|\\+)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\+)WIN(\\+[^+]+)*\\+L$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\+)WIN(\\+[^+]+)*\\+R$"
+          }
+        }
+      ],
+      "description": "Canonical chords use modifiers in Ctrl, Alt, Shift, Windows order. Windows-reserved Windows+L and Windows+R are not supported."
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "steps"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "definition_version": {
+          "const": 1,
+          "default": 1,
+          "description": "Version of the saved command behavior contract."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 256,
+          "default": ""
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "default": "General"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/commandStep"
+          }
+        }
+      }
+    },
+    "commandStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "parameters"],
+      "properties": {
+        "type": {
+          "enum": ["open_url", "keyboard_shortcut", "wait"]
+        },
+        "parameters": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/openUrlParameters"
+            },
+            {
+              "$ref": "#/$defs/keyboardShortcutParameters"
+            },
+            {
+              "$ref": "#/$defs/waitParameters"
+            }
+          ]
+        }
+      }
+    },
+    "waitParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["milliseconds"],
+      "properties": {
+        "milliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    }
+  }
+}

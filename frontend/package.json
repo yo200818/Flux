@@ -1,0 +1,43 @@
+{
+  "name": "pocketdeck-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "tsc && vite build",
+    "build:web": "tsc && vite build",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "preview": "vite preview",
+    "preview:web": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
+    "tauri": "tauri",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-backend.ps1",
+    "build:windows": "npm run build:backend && npm run build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "jsdom": "^27.4.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.0"
+  }
+}

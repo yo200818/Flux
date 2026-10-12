@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+websockets>=13,<16
+httpx
+pytest
+cryptography>=44,<47

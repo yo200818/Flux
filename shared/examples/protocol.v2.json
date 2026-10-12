@@ -1,0 +1,416 @@
+[
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000012",
+    "type": "pairing.claim",
+    "payload": {
+      "pairing_code": "012345",
+      "device_name": "PocketDeck Android",
+      "client_type": "android",
+      "supported_protocol_versions": [2],
+      "supported_configuration_versions": [2]
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000013",
+    "in_reply_to": "00000000-0000-4000-8000-000000000012",
+    "type": "pairing.pending",
+    "payload": {
+      "request_id": "9fb26953-43b6-4ffa-998a-1364bc646f45",
+      "device_id": "6b7bb8da-a30a-45bd-9b89-4a42a191a7c4",
+      "status": "pending",
+      "expires_at": "2030-01-01T00:05:00Z"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000014",
+    "in_reply_to": "00000000-0000-4000-8000-000000000012",
+    "type": "pairing.approved",
+    "payload": {
+      "request_id": "9fb26953-43b6-4ffa-998a-1364bc646f45",
+      "device_id": "6b7bb8da-a30a-45bd-9b89-4a42a191a7c4",
+      "credential": "example-only-placeholder-credential-0000",
+      "credential_expires_at": null
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000015",
+    "type": "config.sync",
+    "payload": {
+      "last_accepted": null
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000016",
+    "in_reply_to": "00000000-0000-4000-8000-000000000015",
+    "type": "config.snapshot",
+    "payload": {
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "revision": 0,
+      "configuration": {
+        "schema_version": 2,
+        "deck": {
+          "id": "pocketdeck-main",
+          "name": "PocketDeck"
+        },
+        "profiles": [
+          {
+            "id": "default",
+            "name": "Default",
+            "pages": [
+              {
+                "id": "main",
+                "name": "Main",
+                "grid": {
+                  "columns": 2,
+                  "rows": 2
+                },
+                "buttons": [
+                  {
+                    "id": "open-site-button",
+                    "label": "Open Website",
+                    "icon": "globe",
+                    "color": "#5B9DFF",
+                    "action_id": "open-site"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "id": "open-site",
+            "target": "windows_host",
+            "type": "open_url",
+            "enabled_for_execution": true,
+            "parameters": {
+              "url": "https://example.com/"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000001",
+    "type": "client.hello",
+    "payload": {
+      "device_id": "6b7bb8da-a30a-45bd-9b89-4a42a191a7c4",
+      "supported_protocol_versions": [2],
+      "supported_configuration_versions": [2]
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000002",
+    "in_reply_to": "00000000-0000-4000-8000-000000000001",
+    "type": "server.welcome",
+    "payload": {
+      "session_id": "fc6cd066-874d-4f15-a77a-1ba95662ccaf",
+      "server_id": "3f5067d0-6e85-49b7-9cef-64476fdb3473",
+      "selected_protocol_version": 2,
+      "selected_configuration_version": 2,
+      "head": {
+        "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+        "revision": 12
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000003",
+    "type": "config.sync",
+    "payload": {
+      "last_accepted": {
+        "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+        "revision": 11
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000004",
+    "type": "config.delta",
+    "in_reply_to": "00000000-0000-4000-8000-000000000003",
+    "payload": {
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "base_revision": 11,
+      "revision": 12,
+      "operations": [
+        {
+          "op": "profile.upsert",
+          "index": 0,
+          "profile": {
+            "id": "default",
+            "name": "Home",
+            "pages": [
+              {
+                "id": "main",
+                "name": "Main",
+                "grid": {"columns": 2, "rows": 2},
+                "buttons": [
+                  {
+                    "id": "open-site-button",
+                    "label": "Open Website",
+                    "icon": "globe",
+                    "color": "#5B9DFF",
+                    "action_id": "open-site"
+                  },
+                  {
+                    "id": "copy-button",
+                    "label": "Copy",
+                    "icon": "document",
+                    "action_id": "copy-shortcut"
+                  },
+                  {
+                    "id": "open-local-url-button",
+                    "label": "Open locally",
+                    "action_id": "open-local-url"
+                  },
+                  {
+                    "id": "command-button",
+                    "label": "Prepare Copy",
+                    "action_id": "prepare-copy-action"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "settings.replace",
+          "settings": {"confirm_commands": true}
+        }
+      ]
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000005",
+    "type": "message.ack",
+    "in_reply_to": "00000000-0000-4000-8000-000000000004",
+    "payload": {
+      "stage": "configuration.persisted",
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "revision": 12
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000006",
+    "type": "action.execute",
+    "payload": {
+      "button_id": "open-site-button",
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "config_revision": 12,
+      "action": {
+        "id": "open-site",
+        "target": "windows_host",
+        "type": "open_url",
+        "parameters": {
+          "url": "https://example.com/"
+        }
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000007",
+    "in_reply_to": "00000000-0000-4000-8000-000000000006",
+    "type": "message.ack",
+    "payload": {
+      "stage": "action.accepted",
+      "request_id": "00000000-0000-4000-8000-000000000006"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000008",
+    "in_reply_to": "00000000-0000-4000-8000-000000000006",
+    "type": "action.result",
+    "payload": {
+      "action_id": "open-site",
+      "outcome": "succeeded",
+      "message": "Opened the URL in the default browser."
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000017",
+    "type": "pairing.status",
+    "payload": {
+      "request_id": "9fb26953-43b6-4ffa-998a-1364bc646f45"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000018",
+    "in_reply_to": "00000000-0000-4000-8000-000000000017",
+    "type": "pairing.status.result",
+    "payload": {
+      "request_id": "9fb26953-43b6-4ffa-998a-1364bc646f45",
+      "status": "approved"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000019",
+    "type": "action.execute",
+    "payload": {
+      "button_id": "command-button",
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "config_revision": 12,
+      "action": {
+        "id": "prepare-copy-action",
+        "target": "windows_host",
+        "type": "run_command",
+        "parameters": {
+          "command_id": "prepare-copy-command"
+        }
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000020",
+    "in_reply_to": "00000000-0000-4000-8000-000000000019",
+    "type": "message.ack",
+    "payload": {
+      "stage": "action.accepted",
+      "request_id": "00000000-0000-4000-8000-000000000019"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000021",
+    "type": "action.status.query",
+    "payload": {
+      "request_id": "00000000-0000-4000-8000-000000000019"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000022",
+    "in_reply_to": "00000000-0000-4000-8000-000000000021",
+    "type": "action.status.result",
+    "payload": {
+      "request_id": "00000000-0000-4000-8000-000000000019",
+      "outcome": "unknown",
+      "action_id": "prepare-copy-action",
+      "code": "action_outcome_unknown",
+      "message": "The host cannot determine whether this action completed."
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000023",
+    "type": "telemetry.subscribe",
+    "payload": {
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "config_revision": 12,
+      "interval_ms": 5000
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000024",
+    "in_reply_to": "00000000-0000-4000-8000-000000000023",
+    "type": "telemetry.subscribed",
+    "payload": {
+      "stream_id": "a87aab06-931e-4ef8-b681-a35221e3c8f3",
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "config_revision": 12,
+      "interval_ms": 5000,
+      "expires_after_ms": 15000
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000025",
+    "type": "telemetry.update",
+    "payload": {
+      "stream_id": "a87aab06-931e-4ef8-b681-a35221e3c8f3",
+      "sequence": 1,
+      "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+      "config_revision": 12,
+      "sampled_at": "2030-01-01T00:00:00Z",
+      "expires_at": "2030-01-01T00:00:15Z",
+      "metrics": {
+        "cpu_utilization": {"status": "available", "value": 35.2},
+        "memory_usage": {
+          "status": "available",
+          "used_bytes": 8589934592,
+          "total_bytes": 17179869184
+        },
+        "gpu_utilization": {
+          "status": "unavailable",
+          "code": "unsupported",
+          "message": "No supported generic Windows GPU provider is available."
+        },
+        "gpu_temperature": {
+          "status": "unavailable",
+          "code": "unsupported",
+          "message": "A supported hardware-specific temperature provider is unavailable."
+        },
+        "cpu_temperature": {
+          "status": "unavailable",
+          "code": "unsupported",
+          "message": "A trustworthy CPU temperature provider is unavailable."
+        }
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000026",
+    "type": "telemetry.unsubscribe",
+    "payload": {
+      "stream_id": "a87aab06-931e-4ef8-b681-a35221e3c8f3"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000027",
+    "in_reply_to": "00000000-0000-4000-8000-000000000026",
+    "type": "telemetry.unsubscribed",
+    "payload": {
+      "stream_id": "a87aab06-931e-4ef8-b681-a35221e3c8f3"
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000009",
+    "type": "client.ping",
+    "payload": {}
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000010",
+    "in_reply_to": "00000000-0000-4000-8000-000000000009",
+    "type": "server.pong",
+    "payload": {
+      "head": {
+        "config_epoch": "8aa8ce90-35fa-4ab2-9c49-5d4732cb3267",
+        "revision": 12
+      }
+    }
+  },
+  {
+    "protocol_version": 2,
+    "message_id": "00000000-0000-4000-8000-000000000011",
+    "in_reply_to": "00000000-0000-4000-8000-000000000006",
+    "type": "protocol.error",
+    "payload": {
+      "code": "revision_mismatch",
+      "message": "The action was created from a stale configuration revision.",
+      "retryable": false,
+      "details": []
+    }
+  }
+]
