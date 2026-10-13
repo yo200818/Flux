@@ -12,10 +12,12 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.actions.execution import ActionExecutionError
+from app.assets.logo_storage import LogoAssetStore
 from app.api.actions import router as actions_router
 from app.api.configuration import router as configuration_router
 from app.api.devices import router as devices_router
 from app.api.health import router as health_router
+from app.api.logo_assets import router as logo_assets_router
 from app.api.system import router as system_router
 from app.api.websocket import router as websocket_router
 from app.api.websocket_v2 import router as websocket_v2_router
@@ -210,6 +212,9 @@ def create_app(
         raise ValueError("POCKETDECK_ADMIN_TOKEN must contain at least 32 bytes.")
     app.state.admin_token = resolved_admin_token
     configuration_path = config_path or get_default_configuration_path()
+    app.state.logo_asset_store = LogoAssetStore(
+        configuration_path.with_name(f"{configuration_path.stem}-logo-assets")
+    )
     app.state.windows_identity = load_or_create_windows_identity(
         configuration_path.with_name(WIFI_IDENTITY_FILENAME)
     )
@@ -241,6 +246,7 @@ def create_app(
     )
     app.include_router(health_router)
     app.include_router(configuration_router)
+    app.include_router(logo_assets_router)
     app.include_router(actions_router)
     app.include_router(system_router)
     app.include_router(devices_router)

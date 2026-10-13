@@ -43,6 +43,7 @@ import { normalizeShortcut } from "../api/keyboardShortcut";
 import type { ConfigurationState } from "../hooks/useConfiguration";
 import type { SectionId } from "./Sidebar";
 import { ShortcutRecorder } from "./ShortcutRecorder";
+import { LogoAssetPicker } from "./LogoAssetPicker";
 
 interface ConfigurationStudioProps {
   section: Exclude<SectionId, "dashboard">;
@@ -1168,6 +1169,17 @@ export function ConfigurationStudio({
           </form>
           {configuration.profiles.map((profile, index) => (
             <article className="profile-studio-item" key={profile.id}>
+              <LogoAssetPicker
+                label={`${profile.name} profile logo`}
+                value={profile.logo_asset_id}
+                onChange={async (logoAssetId) => {
+                  await mutateProfile(
+                    profile.id,
+                    (item) => ({ ...item, logo_asset_id: logoAssetId }),
+                    "Profile logo saved.",
+                  );
+                }}
+              />
               <div className="profile-studio-heading">
                 <strong>{profile.name}</strong>
                 <div className="studio-list-actions">

@@ -14,6 +14,8 @@ import com.google.gson.JsonParser
 import com.pocketdeck.android.config.ActionModel
 import com.pocketdeck.android.config.ButtonModel
 import com.pocketdeck.android.storage.LocalDeckRepository
+import com.pocketdeck.android.storage.LogoAssetCache
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
@@ -22,6 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -43,6 +46,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.net.ConnectException
@@ -109,9 +113,14 @@ internal fun connectionFailureMessage(
     failure: Throwable,
     transport: ConnectionTransport,
 ): String {
+    val causes = generateSequence(failure) { it.cause }.toList()
+    if (causes.any { it is CertificateException || it is SSLPeerUnverifiedException }) {
+        return "The Windows TLS certificate did not match saved trust or is no longer valid. " +
+            "Scan the current Windows QR code and verify the companion identity before trusting a changed certificate."
+    }
     val message = failure.message?.takeIf { it.isNotBlank() }
         ?: "The Windows connection failed."
-    val cannotReachHost = generateSequence(failure) { it.cause }.any {
+    val cannotReachHost = causes.any {
         it is ConnectException ||
             it is NoRouteToHostException ||
             it is SocketException ||
@@ -121,7 +130,9 @@ internal fun connectionFailureMessage(
     return if (transport == ConnectionTransport.WIFI && cannotReachHost) {
         "$message Check that both devices are on the same private network and allow " +
             "pocketdeck-backend.exe through Windows Defender Firewall on Private " +
-            "networks only; do not allow Public networks."
+            "networks only; do not allow Public networks. If Windows changed networks " +
+            "or its LAN address, scan its current QR code; saved trust is reused when " +
+            "the companion identity and certificate are unchanged."
     } else if (transport == ConnectionTransport.USB && cannotReachHost) {
         "The ADB reverse tunnel is not ready. Keep PocketDeck running on Windows, " +
             "connect the phone with USB debugging authorized, and retry. Details: $message"
@@ -130,6 +141,15 @@ internal fun connectionFailureMessage(
     }
 }
 
+internal fun isPermanentConnectionFailure(failure: Throwable): Boolean =
+    generateSequence(failure) { it.cause }.any {
+        it is PermanentConnectionException ||
+            it is DeviceAuthorizationRejectedException ||
+            it is CertificateException ||
+            it is SSLPeerUnverifiedException ||
+            it is IllegalArgumentException
+    }
+
 internal fun parseWifiConnectionQr(
     contents: String,
     nowEpochSeconds: Long = System.currentTimeMillis() / 1_000L,
@@ -137,17 +157,17 @@ internal fun parseWifiConnectionQr(
     val root = try {
         JsonParser.parseString(contents)
     } catch (failure: RuntimeException) {
-        throw IllegalArgumentException("This QR code does not contain valid PocketDeck data.", failure)
+        throw IllegalArgumentException("This QR code does not contain valid Flux data.", failure)
     }
-    require(root.isJsonObject) { "This QR code does not contain PocketDeck connection data." }
+    require(root.isJsonObject) { "This QR code does not contain Flux connection data." }
     val qr = root.asJsonObject
     require(qr.get("type")?.asString == "pocketdeck.connection") {
-        "This QR code is not a PocketDeck connection code."
+        "This QR code is not a Flux connection code."
     }
     val version = qr.get("version")?.asInt
-        ?: error("The PocketDeck QR code has no supported format version.")
+        ?: error("The Flux QR code has no supported format version.")
     require(version == 1 || version == 2) {
-        "This PocketDeck QR code uses an unsupported format. Update PocketDeck on Windows and scan again."
+        "This Flux QR code uses an unsupported format. Update PocketDeck for Windows and scan again."
     }
     val addresses = if (version == 1) {
         qr.getAsJsonArray("addresses")
@@ -352,10 +372,10 @@ private class AndroidKeystoreCipher(private val keyAlias: String) {
         val sealed = try {
             Base64.decode(encoded, Base64.NO_WRAP)
         } catch (error: IllegalArgumentException) {
-            throw IllegalStateException("Protected PocketDeck data is malformed.", error)
+            throw IllegalStateException("Protected Flux data is malformed.", error)
         }
         if (sealed.size <= GCM_NONCE_BYTES) {
-            throw IllegalStateException("Protected PocketDeck data is incomplete.")
+            throw IllegalStateException("Protected Flux data is incomplete.")
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(
@@ -405,10 +425,13 @@ class AndroidWifiTransport(
     private val credentials: AndroidDeviceCredentialStore,
 ) {
     private val applicationContext = context.applicationContext
+    private val logoAssetCache = LogoAssetCache(applicationContext.filesDir)
     private val gson = Gson()
+    private val connectionMutex = Mutex()
     @Volatile private var activeSocket: WebSocket? = null
     @Volatile private var synchronizedEpoch: String? = null
     @Volatile private var synchronizedRevision: Long? = null
+    @Volatile private var disconnectedAt: Long? = null
     private val actionResults = ConcurrentHashMap<String, CompletableDeferred<Envelope>>()
 
     suspend fun executeAction(button: ButtonModel, action: ActionModel): String {
@@ -467,32 +490,47 @@ class AndroidWifiTransport(
         onPaired: () -> Unit,
         onSnapshot: suspend () -> Unit,
     ) {
-        validateSettings(settings, transport)
-        if (transport == ConnectionTransport.USB) {
-            awaitUsbTunnelReady(settings.port, onStatus)
+        if (!connectionMutex.tryLock()) {
+            throw PermanentConnectionException(
+                "A Flux connection attempt is already active.",
+            )
         }
-        var savedCredential = credentials.read()
-        if (savedCredential == null) {
-            val code = pairingCode?.trim().orEmpty()
-            require(!pairingPinRequired(transport, hasSavedCredential = false) ||
-                isValidPairingPin(code)
-            ) {
-                "Enter the active six-digit Windows Wi-Fi pairing PIN before connecting."
-            }
-            savedCredential = pair(settings, code, transport, deviceName, onStatus)
-            onPaired()
-        }
+        val attemptId = UUID.randomUUID().toString()
+        val attemptStartedAt = SystemClock.elapsedRealtime()
+        Log.i(
+            TAG,
+            "Connection attempt started id=$attemptId transport=${transport.name.lowercase()}.",
+        )
         try {
+            validateSettings(settings, transport)
+            if (transport == ConnectionTransport.USB) {
+                awaitUsbTunnelReady(settings.port, onStatus)
+            }
+            var savedCredential = credentials.read()
+            if (savedCredential == null) {
+                val code = pairingCode?.trim().orEmpty()
+                require(!pairingPinRequired(transport, hasSavedCredential = false) ||
+                    isValidPairingPin(code)
+                ) {
+                    "Enter the active six-digit Windows Wi-Fi pairing PIN before connecting."
+                }
+                savedCredential = pair(settings, code, transport, deviceName, onStatus)
+                onPaired()
+            }
             runAuthenticatedSession(
                 settings,
                 savedCredential,
                 transport,
                 onStatus,
                 onSnapshot,
+                attemptId,
+                attemptStartedAt,
             )
         } catch (rejected: DeviceAuthorizationRejectedException) {
             credentials.clear()
             throw rejected
+        } finally {
+            connectionMutex.unlock()
         }
     }
 
@@ -563,7 +601,9 @@ class AndroidWifiTransport(
                 if (message.type == "pairing.status.result") {
                     val status = message.payload.get("status")?.asString
                     if (status == "rejected" || status == "expired") {
-                        error("Windows pairing was $status. Create a new pairing code.")
+                        throw PermanentConnectionException(
+                            "Windows pairing was $status. Create a new pairing code.",
+                        )
                     }
                 }
                 if (message.type != "pairing.approved") continue
@@ -632,6 +672,8 @@ class AndroidWifiTransport(
         transport: ConnectionTransport,
         onStatus: (String) -> Unit,
         onSnapshot: suspend () -> Unit,
+        attemptId: String,
+        attemptStartedAt: Long,
     ) {
         val (deviceId, credential) = identity
         onStatus(if (transport == ConnectionTransport.USB) {
@@ -641,12 +683,13 @@ class AndroidWifiTransport(
         })
         val tlsStartedAt = SystemClock.elapsedRealtime()
         val (socket, messages, client) = open(settings, credential)
+        var sessionConnected = false
         try {
             withTimeout(SESSION_SETUP_TIMEOUT_MS) {
                 awaitOpen(messages)
                 Log.i(
                     TAG,
-                    "TLS handshake completed transport=${transport.name.lowercase()} " +
+                    "TLS handshake completed attempt_id=$attemptId " +
                         "elapsed_ms=${SystemClock.elapsedRealtime() - tlsStartedAt}.",
                 )
                 onStatus("Authenticating")
@@ -665,14 +708,17 @@ class AndroidWifiTransport(
                 val welcome = expectType(messages, "server.welcome")
                 Log.i(
                     TAG,
-                    "Device authentication completed elapsed_ms=" +
+                    "Device authentication completed attempt_id=$attemptId " +
+                        "attempt_to_authenticated_ms=" +
+                        "${SystemClock.elapsedRealtime() - attemptStartedAt} " +
+                        "authentication_exchange_ms=" +
                         "${SystemClock.elapsedRealtime() - authenticationStartedAt}.",
                 )
                 if (welcome.inReplyTo != helloId ||
                     welcome.payload.get("selected_protocol_version")?.asInt != 2 ||
                     welcome.payload.get("selected_configuration_version")?.asInt != 2
                 ) {
-                    error("Windows selected an unsupported PocketDeck protocol.")
+                    error("Windows selected an unsupported connection protocol.")
                 }
                 val expectedServerId = settings.serverId
                 if (expectedServerId.isNotBlank() &&
@@ -682,7 +728,20 @@ class AndroidWifiTransport(
                 }
                 val head = welcome.payload.getAsJsonObject("head")
                     ?: error("Windows returned an invalid configuration revision.")
-                val known = preferences.lastAccepted()
+                val hasCachedDeck = try {
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        repository.restore() != null
+                    }
+                } catch (failure: Exception) {
+                    Log.w(
+                        TAG,
+                        "Cached deck could not be restored type=${failure.javaClass.simpleName}; requesting a fresh snapshot.",
+                    )
+                    false
+                }
+                val known = preferences.lastAccepted().takeIf {
+                    transport == ConnectionTransport.WIFI && hasCachedDeck
+                }
                 val syncId = UUID.randomUUID().toString()
                 val snapshotStartedAt = SystemClock.elapsedRealtime()
                 send(
@@ -692,27 +751,110 @@ class AndroidWifiTransport(
                     configurationSyncPayload(known),
                 )
                 onStatus("Loading Windows configuration")
-                val firstSnapshot = expectType(messages, "config.snapshot")
-                if (firstSnapshot.inReplyTo != syncId) {
-                    error("Windows returned a configuration snapshot for another request.")
+                val firstSyncResult = expectOneOf(
+                    messages,
+                    setOf("config.snapshot", "config.synced"),
+                )
+                if (firstSyncResult.inReplyTo != syncId) {
+                    throw PermanentConnectionException(
+                        "Windows returned configuration synchronization for another request.",
+                    )
                 }
-                acceptSnapshot(firstSnapshot, head, onSnapshot)
+                val syncedEpoch: String
+                val syncedRevision: Long
+                if (firstSyncResult.type == "config.snapshot") {
+                    acceptSnapshot(
+                        firstSyncResult,
+                        head,
+                        onSnapshot,
+                        forceRestore = !hasCachedDeck,
+                        settings = settings,
+                        credential = credential,
+                    )
+                    syncedEpoch = firstSyncResult.payload.get("config_epoch")?.asString
+                        ?: error("Windows configuration snapshot has no epoch.")
+                    syncedRevision = firstSyncResult.payload.get("revision")?.asLong
+                        ?: error("Windows configuration snapshot has no revision.")
+                } else {
+                    val epoch = firstSyncResult.payload.get("config_epoch")?.asString
+                        ?: error("Windows configuration acknowledgement has no epoch.")
+                    val revision = firstSyncResult.payload.get("revision")?.asLong
+                        ?: error("Windows configuration acknowledgement has no revision.")
+                    val headEpoch = head.get("config_epoch")?.asString
+                    val headRevision = head.get("revision")?.asLong
+                    if (known != (epoch to revision) || headEpoch != epoch ||
+                        headRevision != revision
+                    ) {
+                        throw PermanentConnectionException(
+                            "Windows configuration acknowledgement did not match the cached deck.",
+                        )
+                    }
+                    withContext(Dispatchers.IO) {
+                        synchronizeCachedLogos(settings, credential)
+                    }
+                    onSnapshot()
+                    synchronizedEpoch = epoch
+                    synchronizedRevision = revision
+                    syncedEpoch = epoch
+                    syncedRevision = revision
+                }
                 Log.i(
                     TAG,
-                    "Initial configuration snapshot delivered elapsed_ms=" +
+                    "Initial configuration restored attempt_id=$attemptId " +
+                        "elapsed_ms=" +
                         "${SystemClock.elapsedRealtime() - snapshotStartedAt} " +
-                        "revision=${firstSnapshot.payload.get("revision")?.asLong}.",
+                        "attempt_to_deck_display_ms=" +
+                        "${SystemClock.elapsedRealtime() - attemptStartedAt} " +
+                        "epoch=$syncedEpoch revision=$syncedRevision.",
                 )
             }
             onStatus("Connected")
+            sessionConnected = true
+            val recoveredAt = SystemClock.elapsedRealtime()
+            val previousDisconnect = disconnectedAt
+            if (transport == ConnectionTransport.WIFI && previousDisconnect != null) {
+                Log.i(
+                    TAG,
+                    "Wi-Fi session recovered attempt_id=$attemptId " +
+                        "interruption_to_deck_display_ms=${recoveredAt - previousDisconnect}.",
+                )
+                disconnectedAt = null
+            }
+
+            var outstandingPingId: String? = null
+            var pingDeadline = 0L
 
             while (currentCoroutineContext().isActive) {
-                val message = withTimeoutOrNull(PING_INTERVAL_MS) {
+                val waitMillis = if (outstandingPingId == null) {
+                    PING_INTERVAL_MS
+                } else {
+                    (pingDeadline - SystemClock.elapsedRealtime()).coerceAtLeast(1L)
+                }
+                val message = withTimeoutOrNull(waitMillis) {
                     receive(messages)
                 }
                 if (message == null) {
+                    if (outstandingPingId != null) {
+                        if (transport != ConnectionTransport.WIFI) {
+                            outstandingPingId = null
+                            continue
+                        }
+                        Log.w(
+                            TAG,
+                            "WebSocket heartbeat timed out attempt_id=$attemptId " +
+                                "timeout_ms=$PONG_TIMEOUT_MS.",
+                        )
+                        throw HeartbeatTimeoutException()
+                    }
                     val pingId = UUID.randomUUID().toString()
                     send(socket, pingId, "client.ping", JsonObject())
+                    outstandingPingId = pingId
+                    pingDeadline = SystemClock.elapsedRealtime() + PONG_TIMEOUT_MS
+                    Log.i(
+                        TAG,
+                        "WebSocket heartbeat sent attempt_id=$attemptId " +
+                            "response_timeout_ms=$PONG_TIMEOUT_MS.",
+                    )
                     continue
                 }
                 if (message.type == "protocol.error") throw protocolFailure(message)
@@ -722,7 +864,13 @@ class AndroidWifiTransport(
                             message.payload.keySet() ==
                             setOf("config_epoch", "revision", "configuration")
                         ) { "Windows sent an invalid configuration upload." }
-                        acceptSnapshot(message, null, onSnapshot)
+                        acceptSnapshot(
+                            message,
+                            null,
+                            onSnapshot,
+                            settings = settings,
+                            credential = credential,
+                        )
                         "succeeded" to "Configuration saved on this Android device."
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled
@@ -746,10 +894,25 @@ class AndroidWifiTransport(
                 if (message.type == "action.result") {
                     val replyId = message.inReplyTo
                     if (replyId != null) actionResults[replyId]?.complete(message)
-                } else
-                if (message.type == "config.snapshot") {
-                    acceptSnapshot(message, null, onSnapshot)
-                } else if (message.type != "server.pong") {
+                } else if (message.type == "config.snapshot") {
+                    acceptSnapshot(
+                        message,
+                        null,
+                        onSnapshot,
+                        settings = settings,
+                        credential = credential,
+                    )
+                } else if (message.type == "server.pong") {
+                    if (message.inReplyTo == outstandingPingId &&
+                        outstandingPingId != null
+                    ) {
+                        Log.i(TAG, "WebSocket heartbeat acknowledged attempt_id=$attemptId.")
+                        outstandingPingId = null
+                        pingDeadline = 0L
+                    } else {
+                        Log.w(TAG, "Ignoring an unmatched WebSocket heartbeat response.")
+                    }
+                } else {
                     error("Windows sent an unsupported message: ${message.type}.")
                 }
             }
@@ -760,6 +923,16 @@ class AndroidWifiTransport(
                 activeSocket = null
                 synchronizedEpoch = null
                 synchronizedRevision = null
+            }
+            Log.i(
+                TAG,
+                "WebSocket session ended attempt_id=$attemptId " +
+                    "duration_ms=${SystemClock.elapsedRealtime() - attemptStartedAt}.",
+            )
+            if (sessionConnected && transport == ConnectionTransport.WIFI &&
+                currentCoroutineContext().isActive
+            ) {
+                disconnectedAt = SystemClock.elapsedRealtime()
             }
             actionResults.values.forEach {
                 it.completeExceptionally(IllegalStateException("Windows connection was lost."))
@@ -772,6 +945,9 @@ class AndroidWifiTransport(
         message: Envelope,
         welcomeHead: JsonObject?,
         onSnapshot: suspend () -> Unit,
+        forceRestore: Boolean = false,
+        settings: WifiConnectionSettings,
+        credential: String,
     ) {
         val epoch = message.payload.get("config_epoch")?.asString
             ?: error("Windows configuration snapshot has no epoch.")
@@ -794,15 +970,113 @@ class AndroidWifiTransport(
         if (previous?.first == epoch && revision < previous.second) {
             error("Windows returned an older configuration revision. The local cache was kept.")
         }
-        if (previous?.first != epoch || previous.second != revision) {
+        if (forceRestore || previous?.first != epoch || previous.second != revision) {
             withContext(kotlinx.coroutines.Dispatchers.IO) {
                 repository.importConfiguration(configuration.toString())
                 preferences.saveAccepted(epoch, revision)
             }
-            onSnapshot()
         }
+        withContext(Dispatchers.IO) {
+            synchronizeCachedLogos(settings, credential)
+        }
+        onSnapshot()
         synchronizedEpoch = epoch
         synchronizedRevision = revision
+    }
+
+    private fun synchronizeCachedLogos(
+        settings: WifiConnectionSettings,
+        credential: String,
+    ) {
+        val stored = repository.restore() ?: return
+        val assetIds = buildSet {
+            stored.configuration.profiles.forEach { profile ->
+                profile.logoAssetId?.let(::add)
+                profile.pages.forEach { page ->
+                    page.buttons.forEach { button -> button.logoAssetId?.let(::add) }
+                }
+            }
+            stored.configuration.actions.forEach { action ->
+                action.logoAssetId?.let(::add)
+            }
+        }
+        assetIds.forEach { assetId ->
+            if (logoAssetCache.contains(assetId)) return@forEach
+            try {
+                downloadLogoAsset(assetId, settings, credential)
+            } catch (failure: Exception) {
+                if (failure is kotlinx.coroutines.CancellationException) throw failure
+                Log.w(
+                    TAG,
+                    "A synchronized logo could not be cached type=${failure.javaClass.simpleName}.",
+                )
+            }
+        }
+    }
+
+    private fun downloadLogoAsset(
+        assetId: String,
+        settings: WifiConnectionSettings,
+        credential: String,
+    ) {
+        require(assetId.matches(Regex("logo_[a-f0-9]{32}"))) {
+            "Windows configuration contains an invalid logo reference."
+        }
+        val trustManager = PinnedCertificateTrustManager(settings.certificateFingerprint)
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(trustManager), SecureRandom())
+        }
+        val verifier = HostnameVerifier { _, session ->
+            val certificate = session.peerCertificates.firstOrNull() as? X509Certificate
+            certificate != null && trustManager.matches(certificate)
+        }
+        val client = OkHttpClient.Builder()
+            .sslSocketFactory(sslContext.socketFactory, trustManager)
+            .hostnameVerifier(verifier)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
+            .build()
+        val host = settings.host.removePrefix("[").removeSuffix("]")
+        val urlHost = if (host.contains(':')) "[$host]" else host
+        try {
+            val request = Request.Builder()
+                .url("https://$urlHost:${settings.port}/api/logo-assets/$assetId")
+                .header("Authorization", "Bearer $credential")
+                .header("Accept", "image/webp")
+                .build()
+            client.newCall(request).execute().use { response ->
+                check(response.isSuccessful) {
+                    "Windows logo download failed with HTTP ${response.code}."
+                }
+                val body = response.body ?: error("Windows returned an empty logo response.")
+                val contentType = body.contentType()?.toString().orEmpty()
+                check(contentType.substringBefore(';').equals("image/webp", ignoreCase = true)) {
+                    "Windows returned an unsupported logo image type."
+                }
+                check(body.contentLength() in 0..(512L * 1024L)) {
+                    "Windows returned a logo image over the size limit."
+                }
+                val output = java.io.ByteArrayOutputStream()
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        check(total <= 512 * 1024) {
+                            "Windows returned a logo image over the size limit."
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+                logoAssetCache.write(assetId, contentType, output.toByteArray())
+            }
+        } finally {
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
     }
 
     private fun open(
@@ -839,7 +1113,8 @@ class AndroidWifiTransport(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(
                         TAG,
-                        "WebSocket opened response=${response.code} subprotocol=${response.header("Sec-WebSocket-Protocol")}.",
+                        "WebSocket opened response=${response.code} " +
+                            "subprotocol=${response.header("Sec-WebSocket-Protocol")}.",
                     )
                     channel.trySend(Incoming.Opened)
                 }
@@ -852,7 +1127,7 @@ class AndroidWifiTransport(
                     }.onFailure {
                         Log.e(
                             TAG,
-                            "WebSocket message parsing failed type=${it.javaClass.simpleName}: ${it.message}",
+                            "WebSocket message parsing failed type=${it.javaClass.simpleName}.",
                         )
                         channel.trySend(Incoming.Closed(it))
                     }
@@ -865,9 +1140,13 @@ class AndroidWifiTransport(
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.i(TAG, "WebSocket closed code=$code reason=${reason.take(120)}.")
+                    Log.i(
+                        TAG,
+                        "WebSocket closed code=$code reason_class=${webSocketCloseReasonClass(code)} " +
+                            "reason_length=${reason.length}.",
+                    )
                     channel.trySend(Incoming.Closed(IllegalStateException(
-                        "Windows closed the connection ($code): $reason",
+                        "Windows closed the connection ($code).",
                     )))
                 }
 
@@ -882,7 +1161,7 @@ class AndroidWifiTransport(
                     )
                     Log.e(
                         TAG,
-                        "WebSocket failed type=${t.javaClass.simpleName}: ${t.message}; " +
+                        "WebSocket failed type=${t.javaClass.simpleName}; " +
                             "httpCode=${response?.code} authenticated=${credential != null} " +
                             "credentialRejected=${credentialRejection != null}",
                     )
@@ -920,9 +1199,22 @@ class AndroidWifiTransport(
             if (message.type == "pairing.status.result") {
                 val status = message.payload.get("status")?.asString
                 if (status == "rejected" || status == "expired") {
-                    error("Windows pairing was $status.")
+                    throw PermanentConnectionException(
+                        "Windows pairing was $status. Create a new pairing code.",
+                    )
                 }
             }
+        }
+    }
+
+    private suspend fun expectOneOf(
+        messages: Channel<Incoming>,
+        expected: Set<String>,
+    ): Envelope {
+        while (true) {
+            val message = receive(messages)
+            if (message.type == "protocol.error") throw protocolFailure(message)
+            if (message.type in expected) return message
         }
     }
 
@@ -963,7 +1255,7 @@ class AndroidWifiTransport(
     private fun protocolFailure(message: Envelope): IllegalStateException {
         val code = message.payload.get("code")?.asString ?: "protocol_error"
         val detail = message.payload.get("message")?.asString ?: "Windows rejected the request."
-        return IllegalStateException("$code: $detail")
+        return PermanentConnectionException("$code: $detail")
     }
 
     private fun validateSettings(
@@ -991,7 +1283,7 @@ class AndroidWifiTransport(
             "protocol_version", "message_id", "in_reply_to", "type", "payload",
         ) }) { "Windows sent an envelope with unsupported fields." }
         require(json.get("protocol_version")?.asInt == 2) {
-            "Windows selected an unsupported PocketDeck protocol."
+            "Windows selected an unsupported connection protocol."
         }
         val messageId = json.get("message_id")?.asString
             ?: error("Windows message is missing its ID.")
@@ -1029,9 +1321,30 @@ class AndroidWifiTransport(
         const val USB_TUNNEL_PROBE_TIMEOUT_MS = 400
         const val USB_TUNNEL_RETRY_INTERVAL_MS = 300L
         const val PING_INTERVAL_MS = 10_000L
+        const val PONG_TIMEOUT_MS = 20_000L
         const val PAIRING_POLL_INTERVAL_MS = 5_000L
         const val ACTION_TIMEOUT_MS = 30_000L
     }
+}
+
+internal class PermanentConnectionException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
+internal class HeartbeatTimeoutException : SocketTimeoutException(
+    "Windows did not acknowledge the connection heartbeat.",
+)
+
+internal fun webSocketCloseReasonClass(code: Int): String = when (code) {
+    1000 -> "normal"
+    1001 -> "going_away"
+    1002 -> "protocol_error"
+    1003 -> "unsupported_data"
+    1008 -> "policy_violation"
+    1009 -> "message_too_large"
+    in 1011..1015 -> "server_error"
+    else -> "other"
 }
 
 internal class DeviceAuthorizationRejectedException : IllegalStateException(

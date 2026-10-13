@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import logging
-import asyncio
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -11,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from app.config.migration import ConfigurationMigrationError, migrate_v1_to_v2
+from app.config.models import configuration_to_document
 from app.actions.execution import ActionExecutionError, execute_configured_action
 from app.devices import PAIRING_CODE_DIGITS, DeviceInput, PairingError
 from app.security import authenticate_token
@@ -96,7 +98,7 @@ def _configuration_snapshot(websocket: WebSocket) -> tuple[int, dict[str, object
     state = websocket.app.state
     current = state.configuration_manager.get_snapshot()
     document = migrate_v1_to_v2(
-        current.configuration.model_dump(mode="json"),
+        configuration_to_document(current.configuration),
         state.windows_identity.migration_namespace,
     )
     return current.revision, document
@@ -151,7 +153,7 @@ async def _execute_action(
             current = state.configuration_manager.get_snapshot()
             legacy_configuration = current.configuration
             v2_document = migrate_v1_to_v2(
-                legacy_configuration.model_dump(mode="json"),
+                configuration_to_document(legacy_configuration),
                 state.windows_identity.migration_namespace,
             )
             if (
@@ -342,7 +344,7 @@ async def websocket_v2(websocket: WebSocket) -> None:
         await websocket.close(code=1008)
         return
 
-    logger.warning(
+    logger.info(
         "Protocol v2 accepted connection_id=%s remote=%s authenticated=%s.",
         connection_id,
         websocket.client.host if websocket.client else "unknown",
@@ -352,7 +354,7 @@ async def websocket_v2(websocket: WebSocket) -> None:
     if authenticated is None:
         try:
             raw = await websocket.receive_text()
-            logger.warning(
+            logger.info(
                 "Protocol v2 received first message connection_id=%s bytes=%s.",
                 connection_id,
                 len(raw.encode("utf-8")),
@@ -428,7 +430,7 @@ async def websocket_v2(websocket: WebSocket) -> None:
                 await _error(websocket, "unsupported_protocol", "Unsupported pairing request.")
                 await websocket.close(code=1008)
                 return
-            logger.warning(
+            logger.info(
                 "Protocol v2 validated pairing claim connection_id=%s message_id=%s.",
                 connection_id,
                 message["message_id"],
@@ -448,10 +450,9 @@ async def websocket_v2(websocket: WebSocket) -> None:
         except (json.JSONDecodeError, ValueError, TypeError) as error:
             logger.warning(
                 "Protocol v2 rejected first pairing message connection_id=%s "
-                "error_type=%s detail=%s.",
+                "error_type=%s.",
                 connection_id,
                 type(error).__name__,
-                str(error)[:240],
             )
             await _error(websocket, "invalid_message", str(error))
             await websocket.close(code=1003)
@@ -461,6 +462,9 @@ async def websocket_v2(websocket: WebSocket) -> None:
     await websocket.app.state.pairing_websocket_manager.register_session(
         websocket, device.device_id
     )
+    session_started_at = time.monotonic()
+    authentication_started_at = session_started_at
+    close_code: int | None = None
     try:
         raw = await websocket.receive_text()
         message, hello_id, _, payload = _envelope(raw)
@@ -504,6 +508,13 @@ async def websocket_v2(websocket: WebSocket) -> None:
             },
             in_reply_to=hello_id,
         )
+        logger.info(
+            "Protocol v2 device authenticated connection_id=%s device_id=%s "
+            "elapsed_ms=%s.",
+            connection_id,
+            device.device_id,
+            int((time.monotonic() - authentication_started_at) * 1000),
+        )
 
         raw = await websocket.receive_text()
         message, sync_id, _, payload = _envelope(raw)
@@ -535,16 +546,44 @@ async def websocket_v2(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
 
+        sync_started_at = time.monotonic()
         revision, configuration = _configuration_snapshot(websocket)
-        await _send(
-            websocket,
-            "config.snapshot",
-            {
-                "config_epoch": state.windows_identity.config_epoch,
-                "revision": revision,
-                "configuration": configuration,
-            },
-            in_reply_to=sync_id,
+        sync_epoch = state.windows_identity.config_epoch
+        last_accepted = payload["last_accepted"]
+        force_snapshot = payload.get("force_snapshot", False)
+        cached_revision_is_current = (
+            not force_snapshot
+            and isinstance(last_accepted, dict)
+            and last_accepted
+            == {"config_epoch": sync_epoch, "revision": revision}
+        )
+        if cached_revision_is_current:
+            await _send(
+                websocket,
+                "config.synced",
+                {"config_epoch": sync_epoch, "revision": revision},
+                in_reply_to=sync_id,
+            )
+        else:
+            await _send(
+                websocket,
+                "config.snapshot",
+                {
+                    "config_epoch": sync_epoch,
+                    "revision": revision,
+                    "configuration": configuration,
+                },
+                in_reply_to=sync_id,
+            )
+        logger.info(
+            "Protocol v2 configuration synchronization completed "
+            "connection_id=%s device_id=%s snapshot_sent=%s revision=%s "
+            "elapsed_ms=%s.",
+            connection_id,
+            device.device_id,
+            not cached_revision_is_current,
+            revision,
+            int((time.monotonic() - sync_started_at) * 1000),
         )
 
         last_revision = revision
@@ -629,11 +668,24 @@ async def websocket_v2(websocket: WebSocket) -> None:
                         "configuration": configuration,
                     },
                 )
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as disconnect:
+        close_code = disconnect.code
         return
     except (json.JSONDecodeError, ValueError, TypeError) as error:
-        logger.info("Closing invalid Protocol v2 connection: %s", error)
+        logger.info(
+            "Closing invalid Protocol v2 connection connection_id=%s "
+            "error_type=%s.",
+            connection_id,
+            type(error).__name__,
+        )
         await _error(websocket, "invalid_message", str(error))
         await websocket.close(code=1003)
     finally:
         await websocket.app.state.pairing_websocket_manager.forget_session(websocket)
+        logger.info(
+            "Protocol v2 session closed connection_id=%s close_code=%s "
+            "duration_ms=%s.",
+            connection_id,
+            close_code,
+            int((time.monotonic() - session_started_at) * 1000),
+        )

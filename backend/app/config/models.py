@@ -5,9 +5,11 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    SerializerFunctionWrapHandler,
     StringConstraints,
     ValidationError,
     field_validator,
+    model_serializer,
 )
 
 from app.actions.definitions import DEFAULT_ACTION_REGISTRY
@@ -22,6 +24,10 @@ PocketDeckId = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
     ),
 ]
+LogoAssetId = Annotated[
+    str,
+    StringConstraints(pattern=r"^logo_[a-f0-9]{32}$"),
+]
 ShortName = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 IconReference = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 ButtonColor = Annotated[
@@ -34,16 +40,29 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LogoAwareModel(StrictModel):
+    @model_serializer(mode="wrap")
+    def serialize_logo_reference(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, Any]:
+        serialized = handler(self)
+        if "logo_asset_id" not in self.model_fields_set:
+            serialized.pop("logo_asset_id", None)
+        return serialized
+
+
 class Grid(StrictModel):
     columns: int = Field(ge=1, le=8)
     rows: int = Field(ge=1, le=8)
 
 
-class Button(StrictModel):
+class Button(LogoAwareModel):
     id: PocketDeckId
     label: ShortName
     icon: IconReference | None = None
     color: ButtonColor | None = None
+    logo_asset_id: LogoAssetId | None = None
     action_id: PocketDeckId | None
 
 
@@ -54,17 +73,19 @@ class Page(StrictModel):
     buttons: list[Button] = Field(max_length=64)
 
 
-class Profile(StrictModel):
+class Profile(LogoAwareModel):
     id: PocketDeckId
     name: ShortName
+    logo_asset_id: LogoAssetId | None = None
     pages: list[Page] = Field(min_length=1, max_length=32)
 
 
-class ActionInstance(StrictModel):
+class ActionInstance(LogoAwareModel):
     id: PocketDeckId
     type: str
     parameters: dict[str, Any]
     enabled_for_execution: StrictBool = False
+    logo_asset_id: LogoAssetId | None = None
 
 
 class SavedShortcut(StrictModel):
@@ -104,6 +125,10 @@ class Configuration(StrictModel):
     commands: list[CustomCommand] = Field(default_factory=list, max_length=64)
     shortcuts: list[SavedShortcut] = Field(default_factory=list, max_length=64)
     settings: ApplicationSettings = Field(default_factory=ApplicationSettings)
+
+
+def configuration_to_document(configuration: Configuration) -> dict[str, Any]:
+    return configuration.model_dump(mode="json")
 
 
 class ConfigurationValidationError(ValueError):

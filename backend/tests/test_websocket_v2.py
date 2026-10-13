@@ -35,7 +35,10 @@ def _message(message_type: str, payload: dict[str, object]) -> dict[str, object]
     }
 
 
-def _create_client(tmp_path: Path) -> TestClient:
+def _create_client(
+    tmp_path: Path,
+    client_address: tuple[str, int] = ("testclient", 50000),
+) -> TestClient:
     return TestClient(
         create_app(
             tmp_path / "configuration.json",
@@ -43,6 +46,7 @@ def _create_client(tmp_path: Path) -> TestClient:
             admin_token=ADMIN_TOKEN,
         ),
         base_url="https://testserver",
+        client=client_address,
     )
 
 
@@ -98,8 +102,8 @@ def _connect_authenticated(client: TestClient, device_id: str, credential: str):
 def test_usb_pairing_is_pinless_but_waits_for_windows_approval(
     tmp_path: Path,
 ) -> None:
-    client = _create_client(tmp_path)
-    headers = {"Authorization": f"******"}
+    client = _create_client(tmp_path, client_address=("127.0.0.1", 50000))
+    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
     claim = _message(
         "pairing.claim",
         {
@@ -120,7 +124,7 @@ def test_usb_pairing_is_pinless_but_waits_for_windows_approval(
         assert pending["type"] == "pairing.pending"
         request_id = pending["payload"]["request_id"]
         requests = client.get("/api/pairing/requests", headers=headers)
-        assert requests.status_code == 200
+        assert requests.status_code == 200, requests.text
         assert requests.json()["requests"][0]["transport"] == "usb"
 
         approved = client.post(
@@ -151,11 +155,37 @@ def test_usb_pairing_is_pinless_but_waits_for_windows_approval(
         assert socket.receive_json()["type"] == "server.welcome"
 
 
+def test_usb_pairing_rejects_non_loopback_peer(tmp_path: Path) -> None:
+    client = _create_client(tmp_path, client_address=("192.0.2.10", 50000))
+    claim = _message(
+        "pairing.claim",
+        {
+            "pairing_code": "",
+            "transport": "usb",
+            "device_name": "Remote Android",
+            "client_type": "android",
+            "supported_protocol_versions": [2],
+            "supported_configuration_versions": [2],
+        },
+    )
+
+    with client.websocket_connect(
+        "wss://testserver/ws/v2",
+        subprotocols=["pocketdeck.v2"],
+    ) as socket:
+        socket.send_json(claim)
+        error = socket.receive_json()
+
+    assert error["type"] == "protocol.error"
+    assert error["payload"]["code"] == "unsupported_protocol"
+    assert error["payload"]["message"] == "Unsupported pairing request."
+
+
 def test_configuration_upload_waits_for_authenticated_device_ack(
     tmp_path: Path,
 ) -> None:
     client = _create_client(tmp_path)
-    headers = {"Authorization": f"******"}
+    headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
     device_id, credential = _approve_android(client)
     upload_responses: list[object] = []
 
@@ -250,6 +280,55 @@ def test_wss_pairing_and_initial_snapshot_use_v2_contract(tmp_path: Path) -> Non
         client.app.state.windows_identity.migration_namespace,
     )
     assert all(action["target"] == "windows_host" for action in migrated["actions"])
+
+
+def test_reconnect_reuses_authorization_and_skips_an_unchanged_snapshot(
+    tmp_path: Path,
+) -> None:
+    client = _create_client(tmp_path)
+    device_id, credential = _approve_android(client)
+    accepted_revision: dict[str, object] | None = None
+
+    for expected_type in ("config.snapshot", "config.synced"):
+        with _connect_authenticated(client, device_id, credential) as socket:
+            hello = _message(
+                "client.hello",
+                {
+                    "device_id": device_id,
+                    "supported_protocol_versions": [2],
+                    "supported_configuration_versions": [2],
+                },
+            )
+            socket.send_json(hello)
+            welcome = socket.receive_json()
+            assert welcome["type"] == "server.welcome"
+            head = welcome["payload"]["head"]
+            sync = _message(
+                "config.sync",
+                {
+                    "last_accepted": accepted_revision,
+                    "force_snapshot": accepted_revision is None,
+                },
+            )
+            socket.send_json(sync)
+            response = socket.receive_json()
+
+            assert response["type"] == expected_type
+            assert response["in_reply_to"] == sync["message_id"]
+            if expected_type == "config.snapshot":
+                accepted_revision = {
+                    "config_epoch": response["payload"]["config_epoch"],
+                    "revision": response["payload"]["revision"],
+                }
+                assert accepted_revision == head
+            else:
+                assert response["payload"] == accepted_revision
+                assert "configuration" not in response["payload"]
+                ping = _message("client.ping", {})
+                socket.send_json(ping)
+                pong = socket.receive_json()
+                assert pong["type"] == "server.pong"
+                assert pong["in_reply_to"] == ping["message_id"]
 
 
 def test_invalid_or_revoked_credentials_cannot_open_v2_session(

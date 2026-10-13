@@ -48,6 +48,7 @@ internal fun ConnectionSettingsDialog(
     onUploadQrImage: () -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onCheckForUpdates: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     Dialog(
@@ -183,6 +184,12 @@ internal fun ConnectionSettingsDialog(
                         color = DeckPalette.rose,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+                TextButton(
+                    onClick = onCheckForUpdates,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Check for updates", color = DeckPalette.cyan)
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),

@@ -1,9 +1,13 @@
 package com.pocketdeck.android.ui
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import com.google.gson.JsonParser
 import com.journeyapps.barcodescanner.ScanContract
@@ -11,8 +15,10 @@ import com.journeyapps.barcodescanner.ScanOptions
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -52,6 +58,12 @@ import com.pocketdeck.android.transport.connectionFailureMessage
 import com.pocketdeck.android.transport.hasSameCertificateTrust
 import com.pocketdeck.android.transport.parseWifiConnectionQr
 import com.pocketdeck.android.transport.settingsForTransport
+import com.pocketdeck.android.update.AndroidUpdateManager
+import com.pocketdeck.android.update.PocketDeckRelease
+import com.pocketdeck.android.update.ReadyUpdate
+import com.pocketdeck.android.update.UpdateAvailability
+import com.pocketdeck.android.update.UpdateException
+import com.pocketdeck.android.update.UpdateState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -106,17 +118,22 @@ fun PocketDeckApp(
     var loading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var updateDialogOpen by remember { mutableStateOf(false) }
+    var updateState by remember { mutableStateOf<UpdateState?>(null) }
+    var updateDownloadJob by remember { mutableStateOf<Job?>(null) }
     val executionStates = remember { mutableStateOf<Map<String, ButtonExecutionState>>(emptyMap()) }
     val connectionPreferences = remember(context) { WifiConnectionPreferences(context) }
     val credentialStore = remember(context) { AndroidDeviceCredentialStore(context) }
     val wifiTransport = remember(repository) {
         AndroidWifiTransport(context, repository, connectionPreferences, credentialStore)
     }
+    val updateManager = remember(context) { AndroidUpdateManager(context) }
     var wifiSettings by remember { mutableStateOf(connectionPreferences.load()) }
     var pairingCode by remember { mutableStateOf("") }
     var connectionTransport by remember { mutableStateOf(ConnectionTransport.WIFI) }
     var connectionStatus by remember { mutableStateOf("Windows offline") }
     var connectionJob by remember { mutableStateOf<Job?>(null) }
+    var connectionGeneration by remember { mutableLongStateOf(0L) }
     var qrScannerStartedAt by remember { mutableLongStateOf(0L) }
     var qrImportStartedAt by remember { mutableLongStateOf(0L) }
     var qrProcessing by remember { mutableStateOf(false) }
@@ -127,11 +144,177 @@ fun PocketDeckApp(
     val qrScanOptions = remember {
         ScanOptions()
             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the QR code shown by PocketDeck on Windows")
+            .setPrompt("Scan the QR code shown by PocketDeck for Windows")
             .setBeepEnabled(false)
             .setOrientationLocked(true)
             .setBarcodeImageEnabled(false)
     }
+    val installerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val expectedCode = updateManager.pendingInstallVersionCode()
+        val expectedName = updateManager.pendingInstallVersionName() ?: "the new version"
+        when {
+            expectedCode < 0L -> Unit
+            updateManager.isVersionInstalled(expectedCode.toInt()) -> {
+                updateManager.clearPendingInstall()
+                updateManager.clearReadyUpdate()
+                updateState = UpdateState.Installed(expectedName)
+            }
+            result.resultCode == Activity.RESULT_CANCELED -> {
+                updateManager.clearPendingInstall()
+                val ready = updateManager.readyUpdate()
+                updateState = UpdateState.Cancelled(ready?.release, ready)
+            }
+            else -> {
+                updateState = UpdateState.InstallationLaunched(expectedName)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    fun launchInstaller(update: ReadyUpdate) {
+        try {
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE)
+                .setDataAndType(
+                    updateManager.apkContentUri(update),
+                    "application/vnd.android.package-archive",
+                )
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+            updateManager.markInstallationLaunched(
+                update.release.versionCode,
+                update.release.versionName,
+            )
+            updateState = UpdateState.InstallationLaunched(update.release.versionName)
+            installerLauncher.launch(installIntent)
+        } catch (failure: Exception) {
+            updateManager.clearPendingInstall()
+            updateState = UpdateState.Error(
+                updateErrorMessage(failure),
+                update.release,
+            )
+        }
+    }
+
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val update = updateManager.readyUpdate()
+        when {
+            update == null ->
+                updateState = UpdateState.Error("The verified APK is no longer available.")
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                context.packageManager.canRequestPackageInstalls() ->
+                launchInstaller(update)
+            else ->
+                updateState = UpdateState.InstallPermissionRequired(
+                    update,
+                    "Allow Flux to install apps in Android's system settings, then try again.",
+                )
+        }
+    }
+
+    fun canInstallPackages(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            context.packageManager.canRequestPackageInstalls()
+
+    fun checkForUpdates() {
+        updateDialogOpen = true
+        updateState = UpdateState.Checking
+        scope.launch {
+            try {
+                updateState = when (val result = updateManager.checkForUpdate()) {
+                    is UpdateAvailability.Available -> UpdateState.Available(result.release)
+                    is UpdateAvailability.UpToDate -> UpdateState.UpToDate(result.installedVersion)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                updateState = UpdateState.Error(updateErrorMessage(failure))
+            }
+        }
+    }
+
+    fun observeDownload(id: Long, release: PocketDeckRelease) {
+        updateDownloadJob?.cancel()
+        updateState = UpdateState.Downloading(release, 0L, -1L)
+        updateDownloadJob = scope.launch {
+            try {
+                val ready = updateManager.downloadAndVerify(id, release) { downloaded, total ->
+                    updateState = if (total > 0L && downloaded >= total) {
+                        UpdateState.Verifying(release)
+                    } else {
+                        UpdateState.Downloading(release, downloaded, total)
+                    }
+                }
+                updateState = UpdateState.ReadyToInstall(ready)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                updateState = UpdateState.Error(updateErrorMessage(failure), release)
+            }
+        }
+    }
+
+    fun startUpdateDownload(release: PocketDeckRelease) {
+        try {
+            observeDownload(updateManager.startDownload(release), release)
+        } catch (failure: Exception) {
+            updateState = UpdateState.Error(updateErrorMessage(failure), release)
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        updateManager.cancelDownload()
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
+        val release = (updateState as? UpdateState.Downloading)?.release
+        updateState = UpdateState.Cancelled(release)
+    }
+
+    fun requestInstallPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            updateManager.readyUpdate()?.let(::launchInstaller)
+            return
+        }
+        val update = updateManager.readyUpdate()
+        if (update == null) {
+            updateState = UpdateState.Error("The verified APK is no longer available.")
+            return
+        }
+        try {
+            val settingsIntent = Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}"),
+            )
+            unknownSourcesLauncher.launch(settingsIntent)
+        } catch (_: Exception) {
+            updateState = UpdateState.Error(
+                "Android could not open the app-install permission settings. " +
+                    "Open Flux's app settings and allow installs from this source.",
+                update.release,
+            )
+        }
+    }
+
+    LaunchedEffect(updateManager) {
+        val pendingInstallCode = updateManager.pendingInstallVersionCode()
+        val pendingInstallName = updateManager.pendingInstallVersionName()
+        val readyUpdate = updateManager.readyUpdate()
+        val pendingDownload = updateManager.pendingDownload()
+        when {
+            pendingInstallCode > 0L &&
+                updateManager.isVersionInstalled(pendingInstallCode.toInt()) -> {
+                updateManager.clearPendingInstall()
+                updateManager.clearReadyUpdate()
+                updateState = UpdateState.Installed(pendingInstallName ?: "the new version")
+            }
+            readyUpdate != null -> updateState = UpdateState.ReadyToInstall(readyUpdate)
+            pendingDownload != null -> observeDownload(pendingDownload.first, pendingDownload.second)
+        }
+    }
+
     suspend fun validateQrPayload(contents: String, source: String, startedAt: Long) {
         val validationStartedAt = SystemClock.elapsedRealtime()
         qrProgress = "QR detected. Validating Windows identity and certificate…"
@@ -329,6 +512,8 @@ fun PocketDeckApp(
                     if (connectionTransport == ConnectionTransport.WIFI) {
                         wifiSettings = settings
                     }
+                    connectionGeneration += 1
+                    val attemptGeneration = connectionGeneration
                     connectionJob = scope.launch {
                         var nextPairingCode: String? = pairingCode.takeIf { it.isNotBlank() }
                         var reconnectFailures = 0
@@ -344,22 +529,40 @@ fun PocketDeckApp(
                                         .ifBlank { "Android device" }
                                         .take(48),
                                     onStatus = {
-                                        Log.i(WIFI_LOG_TAG, "Connection status: $it.")
-                                        if (it == "Connected") reconnectFailures = 0
-                                        connectionStatus = it
+                                        if (connectionGeneration == attemptGeneration) {
+                                            Log.i(WIFI_LOG_TAG, "Connection status: $it.")
+                                            if (it == "Connected") {
+                                                reconnectFailures = 0
+                                                errorMessage = null
+                                            }
+                                            connectionStatus = it
+                                        }
                                     },
                                     onPaired = {
-                                        nextPairingCode = null
-                                        pairingCode = ""
+                                        if (connectionGeneration == attemptGeneration) {
+                                            nextPairingCode = null
+                                            pairingCode = ""
+                                        }
                                     },
                                     onSnapshot = {
-                                        storedDeck = withContext(Dispatchers.IO) {
+                                        val restored = withContext(Dispatchers.IO) {
                                             repository.restore()
+                                        }
+                                        if (connectionGeneration == attemptGeneration) {
+                                            storedDeck = restored
+                                                ?: throw com.pocketdeck.android.transport
+                                                    .PermanentConnectionException(
+                                                        "The synchronized Windows deck could not be restored on this device.",
+                                                    )
                                         }
                                     },
                                 )
                             } catch (timeout: TimeoutCancellationException) {
-                                Log.w(WIFI_LOG_TAG, "Connection setup timed out.", timeout)
+                                if (connectionGeneration != attemptGeneration) return@launch
+                                Log.w(
+                                    WIFI_LOG_TAG,
+                                    "Connection attempt timed out type=${timeout.javaClass.simpleName}.",
+                                )
                                 errorMessage = connectionFailureMessage(timeout, connectionTransport)
                                 reconnectFailures += 1
                                 val retryDelay = com.pocketdeck.android.transport
@@ -370,6 +573,7 @@ fun PocketDeckApp(
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (rejected: DeviceAuthorizationRejectedException) {
+                                if (connectionGeneration != attemptGeneration) return@launch
                                 Log.w(
                                     WIFI_LOG_TAG,
                                     "Saved Windows authorization was rejected; pairing is required.",
@@ -379,12 +583,24 @@ fun PocketDeckApp(
                                     "Windows authorization rejected — re-pair required"
                                 return@launch
                             } catch (failure: Exception) {
+                                if (connectionGeneration != attemptGeneration) return@launch
                                 Log.e(
                                     WIFI_LOG_TAG,
-                                    "Connection attempt failed type=${failure.javaClass.simpleName}: ${failure.message}",
+                                    "Connection attempt failed type=${failure.javaClass.simpleName}.",
                                 )
                                 errorMessage =
                                     connectionFailureMessage(failure, connectionTransport)
+                                if (connectionTransport == ConnectionTransport.WIFI &&
+                                    com.pocketdeck.android.transport
+                                        .isPermanentConnectionFailure(failure)
+                                ) {
+                                    Log.w(
+                                        WIFI_LOG_TAG,
+                                        "Permanent Wi-Fi connection failure; automatic retries stopped.",
+                                    )
+                                    connectionStatus = "Connection needs attention"
+                                    return@launch
+                                }
                                 reconnectFailures += 1
                                 val retryDelay = com.pocketdeck.android.transport
                                     .nextReconnectDelayMillis(reconnectFailures)
@@ -404,6 +620,7 @@ fun PocketDeckApp(
 
     Scaffold(
         containerColor = DeckPalette.background,
+        contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(snackbarHost) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -554,6 +771,7 @@ fun PocketDeckApp(
             connectionActive = connectionJob?.isActive == true,
             onPairingCodeChange = { pairingCode = it },
             onTransportChange = {
+                connectionGeneration += 1
                 if (connectionJob?.isActive == true) {
                     connectionJob?.cancel()
                     connectionJob = null
@@ -569,7 +787,12 @@ fun PocketDeckApp(
                 }
             },
             onConnect = startConnection,
+            onCheckForUpdates = {
+                settingsOpen = false
+                checkForUpdates()
+            },
             onDisconnect = {
+                connectionGeneration += 1
                 connectionJob?.cancel()
                 connectionJob = null
                 connectionStatus = "Windows offline"
@@ -586,6 +809,29 @@ fun PocketDeckApp(
                 },
             )
         }
+    }
+    val currentUpdateState = updateState
+    if (updateDialogOpen && currentUpdateState != null) {
+        UpdateDialog(
+            state = currentUpdateState,
+            canInstallPackages = canInstallPackages(),
+            onCheck = ::checkForUpdates,
+            onDownload = ::startUpdateDownload,
+            onCancelDownload = ::cancelUpdateDownload,
+            onInstall = {
+                updateManager.readyUpdate()?.let { update ->
+                    if (canInstallPackages()) {
+                        launchInstaller(update)
+                    } else {
+                        requestInstallPermission()
+                    }
+                } ?: run {
+                    updateState = UpdateState.Error("The verified APK is no longer available.")
+                }
+            },
+            onGrantInstallPermission = ::requestInstallPermission,
+            onDismiss = { updateDialogOpen = false },
+        )
     }
 }
 
@@ -636,6 +882,10 @@ private fun CertificateTrustConfirmation(
         },
     )
 }
+
+private fun updateErrorMessage(failure: Exception): String =
+    (failure as? UpdateException)?.message
+        ?: "The update could not be completed because of a network or storage problem. Please try again."
 
 private fun setExecutionState(
     state: androidx.compose.runtime.MutableState<Map<String, ButtonExecutionState>>,

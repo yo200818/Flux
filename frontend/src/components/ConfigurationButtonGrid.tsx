@@ -20,6 +20,7 @@ import { createConfigurationId } from "../api/configurationEdits";
 import { formatShortcut } from "../api/keyboardShortcut";
 import type { ConfigurationState } from "../hooks/useConfiguration";
 import { Icon } from "./Icon";
+import { LogoAssetPicker } from "./LogoAssetPicker";
 import {
   InlineActionEditor,
   type InlineActionEditorRequest,
@@ -58,6 +59,7 @@ interface ButtonEditorDraft {
   systemMetric: SystemMetricName | "";
   icon: string;
   color: string;
+  logoAssetId: string | null;
 }
 
 interface ViewSelection {
@@ -421,6 +423,7 @@ export function ConfigurationButtonGrid({
     text: string;
   } | null>(null);
   const [editor, setEditor] = useState<ButtonEditorDraft | null>(null);
+  const [actionLogoEdits, setActionLogoEdits] = useState<Record<string, string | null>>({});
   const [inlineActionEditor, setInlineActionEditor] =
     useState<InlineActionEditorRequest | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
@@ -440,6 +443,15 @@ export function ConfigurationButtonGrid({
   const [pendingViewSelection, setPendingViewSelection] =
     useState<ViewSelection | null>(null);
   const [gridEditor, setGridEditor] = useState<GridEditorDraft | null>(null);
+  const logoTargetAction =
+    state.status === "loaded" && editor?.actionId
+      ? state.configuration.actions.find((action) => action.id === editor.actionId)
+      : undefined;
+  const selectedActionLogoId = logoTargetAction
+    ? Object.hasOwn(actionLogoEdits, logoTargetAction.id)
+      ? actionLogoEdits[logoTargetAction.id]
+      : logoTargetAction.logo_asset_id ?? null
+    : null;
   useEffect(() => {
     onDirtyChange?.(
       editor !== null || gridEditor !== null || pendingViewSelection !== null,
@@ -610,6 +622,7 @@ export function ConfigurationButtonGrid({
   ) => {
     setEditorError(null);
     setEditorMessage(null);
+    setActionLogoEdits({});
     setEditor({
       mode: "create",
       profileId: profile.id,
@@ -625,6 +638,7 @@ export function ConfigurationButtonGrid({
       systemMetric: "",
       icon: "",
       color: "",
+      logoAssetId: null,
     });
   };
 
@@ -643,6 +657,7 @@ export function ConfigurationButtonGrid({
       : undefined;
     setEditorError(null);
     setEditorMessage(null);
+    setActionLogoEdits({});
     setEditor({
       mode: "edit",
       buttonId: button.id,
@@ -670,6 +685,7 @@ export function ConfigurationButtonGrid({
         action?.type === "system_monitor" ? action.parameters.metric : "",
       icon: button.icon ?? "",
       color: button.color ?? "",
+      logoAssetId: button.logo_asset_id ?? null,
     });
   };
 
@@ -849,6 +865,10 @@ export function ConfigurationButtonGrid({
       return;
     }
 
+    if (action && Object.hasOwn(actionLogoEdits, action.id)) {
+      action = { ...action, logo_asset_id: actionLogoEdits[action.id] };
+    }
+
     let buttons: ButtonConfiguration[];
     if (editor.mode === "create") {
       if (page.buttons.length >= page.grid.columns * page.grid.rows) {
@@ -863,6 +883,7 @@ export function ConfigurationButtonGrid({
           action_id: action?.id ?? null,
           ...(isButtonIcon(editor.icon) ? { icon: editor.icon } : {}),
           ...(editor.color ? { color: editor.color } : {}),
+          ...(editor.logoAssetId ? { logo_asset_id: editor.logoAssetId } : {}),
         },
       ];
     } else {
@@ -890,13 +911,17 @@ export function ConfigurationButtonGrid({
         } else {
           delete updated.color;
         }
+        if (editor.logoAssetId !== null || Object.hasOwn(button, "logo_asset_id")) {
+          updated.logo_asset_id = editor.logoAssetId;
+        }
         return updated;
       });
     }
 
     const actionToPersist =
       action &&
-      (action.type === "open_url" ||
+      (Object.hasOwn(actionLogoEdits, action.id) ||
+        action.type === "open_url" ||
         action.type === "application" ||
         action.type === "system_control" ||
         action.type === "system_monitor")
@@ -1920,6 +1945,15 @@ export function ConfigurationButtonGrid({
               value={/^#[0-9A-Fa-f]{6}$/.test(editor.color) ? editor.color : "#9584ff"}
             />
           </label>
+          <LogoAssetPicker
+            label="Button logo"
+            value={editor.logoAssetId}
+            onChange={(logoAssetId) =>
+              setEditor((current) =>
+                current ? { ...current, logoAssetId } : current,
+              )
+            }
+          />
           <div
             aria-label="Button appearance preview"
             className="button-appearance-preview"
@@ -2050,6 +2084,19 @@ export function ConfigurationButtonGrid({
                 selectedEditorAction.type !== "system_monitor" &&
                 " (disabled)"}
             </p>
+          )}
+          {selectedEditorAction && (
+            <LogoAssetPicker
+              key={selectedEditorAction.id}
+              label="Action logo"
+              value={selectedActionLogoId}
+              onChange={(assetId) =>
+                setActionLogoEdits((current) => ({
+                  ...current,
+                  [selectedEditorAction.id]: assetId,
+                }))
+              }
+            />
           )}
           {editor.actionType === "open_url" && (
             <>

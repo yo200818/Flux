@@ -34,6 +34,62 @@ class LocalDeckRepositoryTest {
     }
 
     @Test
+    fun synchronizedLogoReferencesAreTypedAndPersistedAcrossRestore() {
+        val source = JsonParser.parseString(
+            TestResources.read("examples/config.v2.json"),
+        ).asJsonObject
+        val logoId = "logo_" + "a".repeat(32)
+        source.getAsJsonArray("profiles")[0].asJsonObject.addProperty("logo_asset_id", logoId)
+        source.getAsJsonArray("profiles")[0].asJsonObject
+            .getAsJsonArray("pages")[0].asJsonObject
+            .getAsJsonArray("buttons")[0].asJsonObject
+            .addProperty("logo_asset_id", logoId)
+        source.getAsJsonArray("actions")[0].asJsonObject.addProperty("logo_asset_id", logoId)
+        val alternateLogoId = "logo_" + "b".repeat(32)
+        val alternateProfile = source.getAsJsonArray("profiles")[0].asJsonObject.deepCopy().apply {
+            addProperty("id", "alternate")
+            addProperty("name", "Alternate")
+            addProperty("logo_asset_id", alternateLogoId)
+            getAsJsonArray("pages").forEachIndexed { pageIndex, element ->
+                element.asJsonObject.apply {
+                    addProperty("id", "alternate-page-$pageIndex")
+                    getAsJsonArray("buttons").forEachIndexed { buttonIndex, button ->
+                        button.asJsonObject.addProperty(
+                            "id",
+                            "alternate-button-$pageIndex-$buttonIndex",
+                        )
+                    }
+                }
+            }
+        }
+        source.getAsJsonArray("profiles").add(alternateProfile)
+
+        val storage = MemoryTextSnapshotStorage()
+        val repository = LocalDeckRepository(storage, namespace, codec)
+        val imported = repository.importConfiguration(source.toString())
+        val switched = repository.updateSelection(
+            imported,
+            DeviceDeckSelection("alternate", "alternate-page-0"),
+        )
+        val restored = LocalDeckRepository(storage, namespace, codec).restore()!!
+
+        assertEquals(logoId, imported.configuration.profiles.first().logoAssetId)
+        assertEquals(logoId, imported.configuration.profiles.first().pages.first().buttons.first().logoAssetId)
+        assertEquals(logoId, imported.configuration.actions.first().logoAssetId)
+        assertEquals("alternate", switched.selection.profileId)
+        assertEquals("alternate", restored.selection.profileId)
+        assertEquals(
+            alternateLogoId,
+            restored.configuration.profiles.first { it.id == restored.selection.profileId }.logoAssetId,
+        )
+        assertEquals(
+            logoId,
+            restored.configuration.profiles.first().pages.first().buttons.first().logoAssetId,
+        )
+        assertEquals(logoId, restored.configuration.actions.first().logoAssetId)
+    }
+
+    @Test
     fun invalidImportLeavesPreviousSnapshotByteForByteUnchanged() {
         val storage = MemoryTextSnapshotStorage()
         val repository = LocalDeckRepository(storage, namespace, codec)

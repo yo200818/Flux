@@ -1068,6 +1068,51 @@
   flex: 0 0 auto;
 }
 
+.logo-asset-picker {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.logo-asset-picker-label {
+  color: #aaa6b8;
+}
+
+.logo-asset-preview {
+  width: 88px;
+  height: 88px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #14131b;
+  object-fit: contain;
+}
+
+.logo-asset-placeholder {
+  display: grid;
+  place-items: center;
+  color: #858191;
+  font-size: 9px;
+}
+
+.logo-asset-select {
+  position: relative;
+  overflow: hidden;
+}
+
+.logo-asset-select input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.logo-asset-help {
+  color: #858191;
+  font-size: 9px;
+}
+
 .button-editor-heading {
   display: flex;
   align-items: center;

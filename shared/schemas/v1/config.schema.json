@@ -62,6 +62,10 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
       "description": "Stable identifier, unique across profiles, pages, buttons, and actions."
     },
+    "logoAssetId": {
+      "type": "string",
+      "pattern": "^logo_[a-f0-9]{32}$"
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -74,6 +78,17 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 64
+        },
+        "logo_asset_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/logoAssetId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional reference to a validated logo thumbnail managed by the Windows companion."
         },
         "pages": {
           "type": "array",
@@ -149,6 +164,17 @@
           "pattern": "^#[0-9A-Fa-f]{6}$",
           "description": "Optional six-digit RGB accent color."
         },
+        "logo_asset_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/logoAssetId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional reference to a validated logo thumbnail managed by the Windows companion."
+        },
         "action_id": {
           "description": "A stable ID referring to a declared action, or null when no action is assigned.",
           "anyOf": [
@@ -194,6 +220,17 @@
               "$ref": "#/$defs/runCommandParameters"
             }
           ]
+        },
+        "logo_asset_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/logoAssetId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional reference to a validated logo thumbnail managed by the Windows companion."
         },
         "enabled_for_execution": {
           "type": "boolean",

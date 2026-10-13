@@ -9,6 +9,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from fastapi.testclient import TestClient
 
+from desktop import _wifi_listener_needs_restart
 from app.main import create_app
 from app.wifi import (
     WIFI_ENABLED_ENV,
@@ -46,6 +47,24 @@ def test_enabled_wifi_binds_loopback_and_private_addresses_only(monkeypatch) -> 
         "192.168.1.7",
         "10.0.0.8",
     ]
+
+
+def test_wifi_listener_refreshes_when_private_addresses_change_or_stop() -> None:
+    assert not _wifi_listener_needs_restart(
+        ["192.168.1.7", "10.0.0.8"],
+        ["10.0.0.8", "192.168.1.7"],
+        server_running=True,
+    )
+    assert _wifi_listener_needs_restart(
+        ["192.168.1.7"],
+        ["192.168.1.8"],
+        server_running=True,
+    )
+    assert _wifi_listener_needs_restart(
+        ["192.168.1.7"],
+        ["192.168.1.7"],
+        server_running=False,
+    )
 
 
 def test_disabled_listener_is_active_on_loopback_only(monkeypatch) -> None:

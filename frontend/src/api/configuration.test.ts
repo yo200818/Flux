@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setApiCredential } from "./authorization";
 import {
+  getLogoAsset,
   getConfiguration,
   isPocketDeckConfiguration,
+  uploadLogoAsset,
   updateConfiguration,
   type ConfigurationSnapshot,
 } from "./configuration";
@@ -196,6 +198,48 @@ describe("getConfiguration", () => {
         }),
       ).toBe(true);
     });
+
+    it("accepts stable logo references on profiles, buttons, and actions", () => {
+      const logoAssetId = `logo_${"a".repeat(32)}`;
+      expect(
+        isPocketDeckConfiguration({
+          ...validConfiguration,
+          profiles: [
+            {
+              ...validConfiguration.profiles[0],
+              logo_asset_id: logoAssetId,
+              pages: [
+                {
+                  ...validConfiguration.profiles[0].pages[0],
+                  buttons: [
+                    {
+                      id: "button-logo",
+                      label: "Launch",
+                      action_id: "open-example",
+                      logo_asset_id: logoAssetId,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          actions: [
+            { ...validConfiguration.actions[0], logo_asset_id: logoAssetId },
+          ],
+        }),
+      ).toBe(true);
+      expect(
+        isPocketDeckConfiguration({
+          ...validConfiguration,
+          profiles: [
+            {
+              ...validConfiguration.profiles[0],
+              logo_asset_id: "logo_invalid",
+            },
+          ],
+        }),
+      ).toBe(false);
+    });
   });
 
   it("requests the configuration endpoint and parses a versioned configuration", async () => {
@@ -243,6 +287,46 @@ describe("getConfiguration", () => {
     expect(requestHeaders(fetchMock).get("Authorization")).toBe(
       "Bearer test-token",
     );
+  });
+
+  it("uploads raw image bytes and fetches authenticated WebP thumbnails", async () => {
+    const assetId = `logo_${"c".repeat(32)}`;
+    const uploadResponse = Response.json({
+      asset_id: assetId,
+      content_type: "image/webp",
+      width: 80,
+      height: 48,
+    }, { status: 201 });
+    const previewResponse = new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { "Content-Type": "image/webp" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(uploadResponse)
+      .mockResolvedValueOnce(previewResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    setApiCredential("logo-test-token");
+    const file = new File(["source"], "logo.png", { type: "image/png" });
+
+    await expect(uploadLogoAsset(file)).resolves.toEqual({
+      asset_id: assetId,
+      content_type: "image/webp",
+      width: 80,
+      height: 48,
+    });
+    const downloaded = await getLogoAsset(assetId);
+    expect(downloaded.type).toBe("image/webp");
+    expect(downloaded.size).toBe(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/logo-assets",
+      expect.objectContaining({
+        method: "POST",
+        body: file,
+      }),
+    );
+    expect(requestHeaders(fetchMock).has("Authorization")).toBe(true);
+    expect(requestHeaders(fetchMock, 1).has("Authorization")).toBe(true);
   });
 
   it("accepts valid v1 configuration payloads with saved commands and shortcuts", async () => {

@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 
-from app.config.models import Configuration, validate_configuration
+from app.config.models import (
+    Configuration,
+    configuration_to_document,
+    validate_configuration,
+)
 
 logger = logging.getLogger(__name__)
 CONFIG_PATH_ENV = "POCKETDECK_CONFIG_PATH"
@@ -117,8 +121,8 @@ class ConfigurationStore:
                 json.dump(
                     {
                         "revision": snapshot.revision,
-                        "configuration": snapshot.configuration.model_dump(
-                            mode="json"
+                        "configuration": configuration_to_document(
+                            snapshot.configuration
                         ),
                     },
                     temporary_file,

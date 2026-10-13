@@ -1,0 +1,6 @@
+# Local Android signing configuration and key material
+key.properties
+signing.properties
+*.jks
+*.keystore
+*.p12

@@ -12,6 +12,7 @@ export interface ApplicationAction {
   type: "application";
   enabled_for_execution: boolean;
   parameters: { name: string; path: string };
+  logo_asset_id?: string | null;
 }
 
 export type SystemControlName =
@@ -26,6 +27,7 @@ export interface SystemControlAction {
   type: "system_control";
   enabled_for_execution: boolean;
   parameters: { control: SystemControlName };
+  logo_asset_id?: string | null;
 }
 
 export type SystemMetricName =
@@ -40,6 +42,7 @@ export interface SystemMonitorAction {
   type: "system_monitor";
   enabled_for_execution: false;
   parameters: { metric: SystemMetricName };
+  logo_asset_id?: string | null;
 }
 
 export interface ButtonConfiguration {
@@ -47,6 +50,7 @@ export interface ButtonConfiguration {
   label: string;
   icon?: string | null;
   color?: string | null;
+  logo_asset_id?: string | null;
   action_id: string | null;
 }
 export interface PageConfiguration {
@@ -58,6 +62,7 @@ export interface PageConfiguration {
 export interface ProfileConfiguration {
   id: string;
   name: string;
+  logo_asset_id?: string | null;
   pages: PageConfiguration[];
 }
 
@@ -66,6 +71,7 @@ export interface OpenUrlAction {
   type: "open_url";
   enabled_for_execution: boolean;
   parameters: { url: string; name?: string };
+  logo_asset_id?: string | null;
 }
 
 export interface KeyboardShortcutAction {
@@ -73,6 +79,7 @@ export interface KeyboardShortcutAction {
   type: "keyboard_shortcut";
   enabled_for_execution: boolean;
   parameters: { shortcut: string } | { shortcut_id: string };
+  logo_asset_id?: string | null;
 }
 
 export interface RunCommandAction {
@@ -80,6 +87,7 @@ export interface RunCommandAction {
   type: "run_command";
   enabled_for_execution: boolean;
   parameters: { command_id: string };
+  logo_asset_id?: string | null;
 }
 
 export type ActionConfiguration =
@@ -182,6 +190,14 @@ function isId(value: unknown): value is string {
   );
 }
 
+function isLogoAssetId(value: unknown): value is string {
+  return isString(value) && /^logo_[a-f0-9]{32}$/.test(value);
+}
+
+function isOptionalLogoAssetId(value: unknown): boolean {
+  return value === undefined || value === null || isLogoAssetId(value);
+}
+
 function isName(value: unknown): value is string {
   return isString(value) && value.length > 0 && value.length <= 64;
 }
@@ -211,9 +227,10 @@ function isSupportedShortcut(value: unknown): value is string {
 function isActionConfiguration(value: unknown): value is ActionConfiguration {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["id", "type", "enabled_for_execution", "parameters"]) ||
+    !hasOnlyKeys(value, ["id", "type", "enabled_for_execution", "parameters", "logo_asset_id"]) ||
     !isId(value.id) ||
     typeof value.enabled_for_execution !== "boolean" ||
+    !isOptionalLogoAssetId(value.logo_asset_id) ||
     !isRecord(value.parameters)
   ) {
     return false;
@@ -283,7 +300,7 @@ function isActionConfiguration(value: unknown): value is ActionConfiguration {
 function isButtonConfiguration(value: unknown): value is ButtonConfiguration {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ["id", "label", "icon", "color", "action_id"]) &&
+    hasOnlyKeys(value, ["id", "label", "icon", "color", "logo_asset_id", "action_id"]) &&
     isId(value.id) &&
     isName(value.label) &&
     (value.icon === undefined ||
@@ -292,6 +309,7 @@ function isButtonConfiguration(value: unknown): value is ButtonConfiguration {
     (value.color === undefined ||
       value.color === null ||
       (isString(value.color) && /^#[0-9A-Fa-f]{6}$/.test(value.color))) &&
+    isOptionalLogoAssetId(value.logo_asset_id) &&
     (value.action_id === null || isId(value.action_id))
   );
 }
@@ -325,9 +343,10 @@ function isProfileConfiguration(
 ): value is ProfileConfiguration {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ["id", "name", "pages"]) &&
+    hasOnlyKeys(value, ["id", "name", "logo_asset_id", "pages"]) &&
     isId(value.id) &&
     isName(value.name) &&
+    isOptionalLogoAssetId(value.logo_asset_id) &&
     Array.isArray(value.pages) &&
     value.pages.length > 0 &&
     value.pages.length <= 32 &&
@@ -700,4 +719,94 @@ export async function updateConfiguration(
     revision: body.revision,
     configuration: savedConfiguration,
   };
+}
+
+export interface UploadedLogoAsset {
+  asset_id: string;
+  content_type: "image/webp";
+  width: number;
+  height: number;
+}
+
+const SUPPORTED_LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_LOGO_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+export async function uploadLogoAsset(file: File): Promise<UploadedLogoAsset> {
+  if (!SUPPORTED_LOGO_TYPES.has(file.type)) {
+    throw new Error("Choose a PNG, JPEG, or WebP image.");
+  }
+  if (file.size < 1 || file.size > MAX_LOGO_UPLOAD_BYTES) {
+    throw new Error("Images must be between 1 byte and 5 MiB.");
+  }
+  const response = await fetch(`${API_BASE_URL}/api/logo-assets`, {
+    method: "POST",
+    headers: addAuthorizationHeader({ "Content-Type": file.type }),
+    body: file,
+  });
+  if (!response.ok) {
+    let message = `Logo upload failed (${response.status}).`;
+    try {
+      const body: unknown = await response.json();
+      if (isRecord(body) && typeof body.detail === "string") {
+        message = body.detail;
+      }
+    } catch {
+      // Keep the explicit HTTP status when the server did not return JSON.
+    }
+    throw new Error(message);
+  }
+
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("The backend returned an invalid logo asset response.");
+  }
+  if (!isRecord(result)) {
+    throw new Error("The backend returned an invalid logo asset response.");
+  }
+  const assetId = result.asset_id;
+  const width = result.width;
+  const height = result.height;
+  if (
+    !isLogoAssetId(assetId) ||
+    result.content_type !== "image/webp" ||
+    typeof width !== "number" ||
+    !Number.isInteger(width) ||
+    width < 1 ||
+    typeof height !== "number" ||
+    !Number.isInteger(height) ||
+    height < 1
+  ) {
+    throw new Error("The backend returned an invalid logo asset response.");
+  }
+  return {
+    asset_id: assetId,
+    content_type: "image/webp",
+    width,
+    height,
+  };
+}
+
+export async function getLogoAsset(
+  assetId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  if (!isLogoAssetId(assetId)) {
+    throw new Error("The logo reference is invalid.");
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/logo-assets/${encodeURIComponent(assetId)}`,
+    {
+      headers: addAuthorizationHeader({ Accept: "image/webp" }),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Logo preview is unavailable (${response.status}).`);
+  }
+  if (response.headers.get("content-type")?.split(";")[0] !== "image/webp") {
+    throw new Error("The backend returned an unsupported logo image.");
+  }
+  return response.blob();
 }

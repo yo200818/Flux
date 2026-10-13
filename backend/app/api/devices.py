@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config.migration import ConfigurationMigrationError, migrate_v1_to_v2
+from app.config.models import configuration_to_document
 from app.devices import PAIRING_CODE_DIGITS, DeviceClientType, DeviceInput, DevicePublic
 from app.realtime import ConfigurationUploadError
 from app.security import require_admin, require_device
@@ -143,7 +144,7 @@ async def upload_configuration_to_device(
     snapshot = state.configuration_manager.get_snapshot()
     try:
         configuration = migrate_v1_to_v2(
-            snapshot.configuration.model_dump(mode="json"),
+            configuration_to_document(snapshot.configuration),
             state.windows_identity.migration_namespace,
         )
     except ConfigurationMigrationError as error:

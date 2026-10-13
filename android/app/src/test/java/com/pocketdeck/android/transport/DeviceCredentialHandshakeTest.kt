@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.net.SocketTimeoutException
+import java.security.cert.CertificateException
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
@@ -197,6 +198,26 @@ class DeviceCredentialHandshakeTest {
         assertEquals(500L, reconnectDelayMillis(1, 0.0))
         assertEquals(1_250L, reconnectDelayMillis(2, 1.0))
         assertEquals(10_000L, reconnectDelayMillis(20, 1.0))
+    }
+
+    @Test
+    fun permanentTrustFailuresStopRetriesButNetworkTimeoutsRemainRetryable() {
+        assertTrue(
+            isPermanentConnectionFailure(
+                IllegalStateException(
+                    "TLS handshake failed",
+                    CertificateException("certificate pin mismatch"),
+                ),
+            ),
+        )
+        assertTrue(!isPermanentConnectionFailure(SocketTimeoutException("connect timed out")))
+    }
+
+    @Test
+    fun closeReasonLoggingUsesOnlySanitizedCategories() {
+        assertEquals("normal", webSocketCloseReasonClass(1000))
+        assertEquals("policy_violation", webSocketCloseReasonClass(1008))
+        assertEquals("other", webSocketCloseReasonClass(4001))
     }
 
     @Test

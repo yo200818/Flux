@@ -178,6 +178,22 @@ def test_protocol_negotiation_fails_closed_without_revision_duplication() -> Non
     with pytest.raises(AssertionError):
         assert_envelope(invalid_protocol, schema)
 
+    synced = {
+        "protocol_version": 2,
+        "message_id": str(UUID(int=1)),
+        "in_reply_to": str(UUID(int=2)),
+        "type": "config.synced",
+        "payload": {
+            "config_epoch": str(UUID(int=3)),
+            "revision": 7,
+        },
+    }
+    assert_envelope(synced, schema)
+    invalid_synced = copy.deepcopy(synced)
+    invalid_synced["payload"]["configuration"] = {}
+    with pytest.raises(AssertionError):
+        assert_envelope(invalid_synced, schema)
+
 
 def test_configuration_delta_is_contiguous_and_uses_only_closed_operations() -> None:
     schema = read_json(PROTOCOL_SCHEMA_PATH)

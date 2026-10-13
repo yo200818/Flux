@@ -10,7 +10,11 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from app.actions.windows_input import normalize_shortcut
-from app.config.models import ConfigurationValidationError, validate_configuration
+from app.config.models import (
+    ConfigurationValidationError,
+    configuration_to_document,
+    validate_configuration,
+)
 
 
 V2_SCHEMA_RELATIVE_PATH = (
@@ -65,7 +69,7 @@ def migrate_v1_to_v2(
             f"{': ' + details if details else '.'}"
         ) from error
 
-    legacy_data = validated_source.model_dump(mode="json")
+    legacy_data = configuration_to_document(validated_source)
     _canonicalize_inline_shortcuts(legacy_data)
     candidate: dict[str, Any] = {
         "schema_version": 2,
@@ -150,7 +154,12 @@ def validate_v2_migration_candidate(candidate: object) -> None:
     if not isinstance(actions, list):
         raise ConfigurationMigrationError("The migrated v2 actions must be an array.")
     for index, action in enumerate(actions):
-        if not isinstance(action, dict) or set(action) != action_required:
+        action_properties = set(action_schema["properties"])
+        if (
+            not isinstance(action, dict)
+            or not action_required <= set(action)
+            or not set(action) <= action_properties
+        ):
             raise ConfigurationMigrationError(
                 f"The migrated action at index {index} does not match the v2 action fields."
             )
@@ -186,7 +195,7 @@ def validate_v2_migration_candidate(candidate: object) -> None:
             f"{': ' + details if details else '.'}"
         ) from error
 
-    if identifier in _legacy_entity_ids(validated_legacy.model_dump(mode="json")):
+    if identifier in _legacy_entity_ids(configuration_to_document(validated_legacy)):
         raise ConfigurationMigrationError(
             "The deterministic v2 deck ID conflicts with a preserved v1 entity ID."
         )

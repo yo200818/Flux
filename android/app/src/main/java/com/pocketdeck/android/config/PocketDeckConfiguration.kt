@@ -22,6 +22,7 @@ data class PocketDeckConfiguration(
                 ProfileModel(
                     id = profile.get("id").asString,
                     name = profile.get("name").asString,
+                    logoAssetId = profile.stringOrNull("logo_asset_id"),
                     pages = profile.getAsJsonArray("pages").map { pageElement ->
                         val page = pageElement.asJsonObject
                         val grid = page.getAsJsonObject("grid")
@@ -37,6 +38,7 @@ data class PocketDeckConfiguration(
                                     label = button.get("label").asString,
                                     icon = button.stringOrNull("icon"),
                                     color = button.stringOrNull("color"),
+                                    logoAssetId = button.stringOrNull("logo_asset_id"),
                                     actionId = button.stringOrNull("action_id"),
                                 )
                             },
@@ -52,6 +54,7 @@ data class PocketDeckConfiguration(
                     type = action.get("type").asString,
                     enabled = action.get("enabled_for_execution").asBoolean,
                     parameters = action.getAsJsonObject("parameters").deepCopy(),
+                    logoAssetId = action.stringOrNull("logo_asset_id"),
                 )
             }
             val commands = document.getAsJsonArrayOrEmpty("commands").map { element ->
@@ -96,7 +99,12 @@ data class PocketDeckConfiguration(
 
 data class DeckModel(val id: String, val name: String)
 
-data class ProfileModel(val id: String, val name: String, val pages: List<PageModel>)
+data class ProfileModel(
+    val id: String,
+    val name: String,
+    val pages: List<PageModel>,
+    val logoAssetId: String? = null,
+)
 
 data class PageModel(
     val id: String,
@@ -112,6 +120,7 @@ data class ButtonModel(
     val icon: String?,
     val color: String?,
     val actionId: String?,
+    val logoAssetId: String? = null,
 )
 
 data class ActionModel(
@@ -120,6 +129,7 @@ data class ActionModel(
     val type: String,
     val enabled: Boolean,
     val parameters: JsonObject,
+    val logoAssetId: String? = null,
 )
 
 data class CommandModel(
@@ -141,4 +151,3 @@ private fun JsonObject.stringOrNull(name: String): String? {
 
 private fun JsonObject.getAsJsonArrayOrEmpty(name: String): JsonArray =
     get(name)?.asJsonArray ?: JsonArray()
-
